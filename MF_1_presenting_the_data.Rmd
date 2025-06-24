@@ -1,0 +1,1019 @@
+---
+title: "Expression heatmaps, PCA, upset plots (master file 1)"
+author: "Ellen Dimmen Chapple"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: lumen
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+
+library(ggplot2)
+library(tidyverse)
+library(cowplot)
+library(gplots)
+library(gdata)
+library(ComplexHeatmap)
+library(circlize)
+library(ggrepel)
+library(stats)
+library(UpSetR)
+
+
+# Run version of ComPlEx
+VER <- "V5" # first run ""
+
+# Ortholog group file
+ORTHOLOG_GROUP_FILE <- "Data/DATA/Orthogroups_20240823_clean_N1.tsv" # Orthogroups.100323.tsv (older), Orthogroups_20240823_clean.tsv (newest), Orthogroups_20240823_clean.tsv (newest, better res)
+
+species_list <- c( "Asp", "Birch","Cher","Nor", "Scots", "Lodge") 
+species_lat_name <- c("P. tremula","B. pendula","P. avium", "P. abies", "P. sylvestris","P. contorta" )
+
+```
+
+
+# Fig 1
+
+**A: PCA - All species and specimens (fig 1A)**
+
+```{r}
+
+
+plots <-list()
+for(i in 1:length(species_list)){
+  
+  # i <- 1
+  species <- species_list[i]
+  species_short <- species_list[i]
+  latin_name <- species_lat_name[i]
+  
+  print(species)
+  file <- paste0("Data/DATA/transcriptomicsData/",species,"Wood_transcriptomics.txt.gz")
+  
+  expr.wide <- read.delim(file, sep = "\t") %>% 
+    column_to_rownames("Genes")
+  
+  n <- ncol(expr.wide)
+  
+  # ------ Cluster samples ------
+  
+  cdist <- as.dist(1-cor(expr.wide, method="pearson"))
+  chc <- hclust(cdist,method="ward.D2")
+  cdendro <- as.dendrogram(chc)
+  
+  order <- rep(0, n)
+  h <- colnames(expr.wide)
+  z <- strsplit(as.character(h), "[.]")
+  h <- unlist(lapply(z,"[",2))
+  h <- as.integer(h)
+  k <- 1
+  for(i in 1:max(ncol(expr.wide))) {
+    for(j in 1:n) {
+      if (h[j] == i) {
+        order[j] = k
+        k <- k+1
+      }
+    }
+  }
+  cdendro <- reorder(cdendro, order, agglo.FUN = mean)
+  chc <- as.hclust(cdendro)
+  
+  cnclust = 4
+  cct <- cutree(chc, k=cnclust)
+  colsamples <- c("#A3CC51","#51A3CC","#CC5151","#B26F2C")
+  ccol <- colsamples[cct]
+  saveRDS(cct,paste0("Data/DATA/cct_", species, ".RDS"))
+
+  
+  # ------ PCA ------
+  pc <- prcomp(t(expr.wide))
+  var.expl <- pc$sdev^2 / sum(pc$sdev^2)
+  
+  p <- cbind(pc$x, data.frame(Clusters = as.factor(cct),
+                              Samples = rownames(pc$x)))
+  
+  # ------ Plot ------
+  p1 <- ggplot(p, aes(PC1, PC2, col = Clusters)) + 
+    xlab(paste0("PC1 (", round(var.expl[1], digits=2),")")) +
+    ylab(paste0("PC2 (", round(var.expl[2], digits=2),")")) +
+    ggtitle(latin_name)+
+    geom_point(size = 4) +
+    scale_color_manual(values=colsamples) +
+    theme_bw() +
+    theme(legend.position = "none", plot.title = element_text(face = "italic"), 
+              text=element_text(size=20), axis.text = element_text(size = 15))
+
+  plots[[length(plots)+1]] <- p1
+
+
+
+    }
+
+
+
+# pca_plot <- plot_grid(plots[[1]],NULL, plots[[2]],NULL, plots[[3]],NULL, plots[[4]], NULL,plots[[5]], NULL,plots[[6]],NULL, nrow = 1, rel_widths = c(rep(c(0.9,0.1), 6)))
+
+pca_plot <- plot_grid(plotlist = plots, nrow=1)
+pca_plot
+
+pdf("PCA_oneSpec.pdf", width = 20, height = 5)
+pca_plot
+dev.off()
+
+```
+
+**B: Expression profiles of select marker genes**
+
+```{r fig.width=10}
+
+title <- "Marker genes"
+
+# ------- Identified marker genes -----
+marker_df <- data.frame(
+  Species = c("Asp", "Birch", "Cher", "Nor", "Scots","Lodge"),
+  SUS6 = c( "Potra2n4c9149" , "Bpev01.c0727.g0009.m0001", "FUN_026680-T1", "PA_chr10_G000052" ,"PS_chr10_G041021_S", "PS_chr10_G041021" ),
+  CDC2 = c(  "Potra2n16c30563",  "Bpev01.c0480.g0058.m0001" ,"FUN_024221-T1" ,"PA_chr04_G001371" ,"PS_chr04_G015565_S" ,"PS_chr04_G015565"),
+  EXPA1 = c( "Potra2n1c2087", "Bpev01.c0564.g0008.m0001", "FUN_019120-T1","PA_chr03_G007209",  "PS_chr03_G013586_S" , "PS_chr03_G013586"),
+  CesA8 = c("Potra2n4c8952" ,   "Bpev01.c0000.g0006.m0001", "FUN_030863-T1", "PA_chr10_G000911", "PS_chr10_G041713_S", "PS_chr10_G041713" ),
+  BFN1 = c("Potra2n689s36475", "Bpev01.c0690.g0007.m0001", "FUN_031924-T1","PA_chr02_G005278", "PS_chr02_G009823_S", "PS_chr02_G009823"  )
+)
+
+# saveRDS(marker_df, file = "Data/DATA/marker_genes.RDS" )
+
+
+df_species_name_and_sections <- data.frame(
+  short = c(rep("Asp",3),rep("Birch", 3), rep("Cher", 3),rep("Nor", 3),  rep("Scots", 3), rep("Lodge", 3)),
+  long = c(rep("P. tremula", 3),  rep("P. pendula", 3),  rep("B. avium",3),rep("P. abies", 3), rep("P. sylvestris",3) ,rep("P. contorta",3)),
+  # sections = c(3.5,9.5,18.5,
+  #              5.5, 9.5, 23.5,
+  #              5.5,9.5,18.5,
+  #              9.5,13.5,19.5,
+  #              7.5,14.5,23.5,
+  #              4.5,9.5,22.5)
+    sections = c(
+              6,11,20,
+              5, 9, 22,
+              4,8,19,
+              8,14,22,
+              6,13,21,
+              4,12,22.5)
+
+  )
+
+file_list_2 <- c()
+for (i in species_list){
+
+  expr_name <- paste0("Data/DATA/transcriptomicsData/",i,"Wood_transcriptomics.txt.gz")
+  file_list_2 <- append(file_list_2, expr_name, after = length(file_list_2))
+
+}
+
+
+
+# -------- Plot marker genes --------
+
+expression_all_longer <- data.frame() 
+plots <- list()
+plots_legends <- list()
+
+scaleFUN <- function(x) sprintf("%2.0f", x)
+palette_1 <- c("#A3CC51", "#034e7b","mediumpurple3", "#CC5151",  "#B26F2C")
+linethickness <-  1.5
+
+#  -------- Combine expression data for all marker genes --------
+for(x in 1:length(file_list_2)){
+  # x <- 2
+  
+  species <- sapply(strsplit(file_list_2[x], "transcriptomicsData/"), "[",2)
+  species <- sapply(strsplit(species, "Wood"), "[", 1)  
+  
+  species_x_genes<- marker_df %>% 
+    filter(Species == species) %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    rownames_to_column(var = "Marker genes") 
+
+    species_x_genes <- species_x_genes[-1,]
+    
+    species_x_genes <- species_x_genes %>% 
+      mutate(`Marker genes` = factor(`Marker genes`, levels = c("SUS6", "CDC2", "EXPA1", "CesA8", "BFN1")))
+  
+  
+  if(species == "Scots"){
+    
+    expression_vector <- read_delim(file_list_2[x], show_col_types = FALSE) %>% 
+      mutate(Genes = paste0(Genes, "_S"))
+    
+    expression_vector <- expression_vector  %>% 
+      select(Genes, contains("1.")) %>% 
+      filter(Genes %in% species_x_genes$V1)
+    
+    
+  }else{  
+    
+    expression_vector <- read_delim(file_list_2[x], show_col_types = FALSE)  %>% 
+      select(Genes, contains("1.")) %>% 
+      filter(Genes %in% species_x_genes$V1)
+    
+  }
+  
+  
+  if(nrow(expression_vector) > 0){
+    
+    gene_order <- rev(unique(species_x_genes$V1))[-6]
+    
+    samples <- colnames(expression_vector)[-1]
+    
+    expression_vector_t <- t(expression_vector) 
+    colnames(expression_vector_t) <- expression_vector_t[1,]
+    
+    expression_vector_t <- expression_vector_t[-1, ,drop = F] %>% 
+      as.data.frame() %>%
+      mutate(Samples = samples)
+    
+
+    longer <- expression_vector_t %>% 
+      pivot_longer(-Samples,names_to = "Genes", values_to = "Expression") %>% 
+      mutate_at("Expression", as.numeric) %>% 
+      mutate(Samples = gsub("^(.+?).", "", Samples)) %>% 
+      mutate(Genes = factor(Genes, levels =  gene_order))
+    
+    
+    longer_end <- longer %>% 
+      mutate(Species = rep(species, nrow(longer))) %>% 
+      group_by(Genes)
+
+    
+    markerGenes <- species_x_genes[-1,]
+    longer_end <- left_join(longer_end, species_x_genes, by = join_by("Genes" == "V1"))
+    
+    
+    expression_all_longer <- rbind(expression_all_longer,longer_end)
+
+    
+  } 
+  
+}
+
+expression_all_longer <- expression_all_longer %>% 
+  group_by(Genes, Species) 
+
+
+# -------- Plot the marker genes --------
+for(q in 1:length(unique(expression_all_longer$Species))){
+  
+  # q <- 1
+  species <- unique(expression_all_longer$Species)[q]
+  
+  
+  df <- expression_all_longer %>% 
+    filter(Species == species) %>% 
+    mutate(Samples = as.numeric(Samples))
+  
+  factor_levels <- c(1:max(df$Samples))
+  
+  df <- df %>% 
+    ungroup() %>% 
+    mutate(factor(Samples, levels = factor_levels)) 
+  
+
+  
+  name_long <- df_species_name_and_sections %>%
+    filter(short == species) %>%
+    select(long) %>%
+    slice(1)
+  
+  name_long_vect <- c(name_long)  
+  sub_title <- paste0(name_long_vect)
+  
+  sections_df <- df_species_name_and_sections %>%
+    filter(short == species)
+
+  
+  species_sections <- unique(sections_df$sections)
+  # aesthetics <- aes_func(length(species_sections))
+
+  plots[[length(plots)+1]]  <-  ggplot(data = df, aes(x = Samples, y = Expression, group = Genes, col =  `Marker genes`)) +
+            scale_x_continuous(breaks = c(0, 10, 20)) +
+        scale_y_continuous(labels=scaleFUN) +
+    geom_line(linewidth = linethickness, show.legend = T) + scale_color_manual(values = palette_1) +
+    geom_vline(xintercept = species_sections,linetype = "dashed",color = "gray68", linewidth=0.5 ) +
+    labs(title = sub_title, y = "Expression (VST)", x = " ") + 
+    theme_bw() +
+    theme(legend.position = "none",plot.title = element_text(face = "italic"), 
+              text=element_text(size=20), axis.title = element_blank())
+
+
+
+
+}
+legend_plot <- ggplot(data = df, aes(x = Samples, y = Expression, group = Genes, col =  `Marker genes`)) +
+    geom_line(linewidth = linethickness, show.legend = TRUE) + scale_color_manual(values = palette_1) +
+    geom_vline(xintercept = species_sections, linetype = "dashed",color = "gray68", linewidth=0.5) +
+    theme_bw()+
+    theme(legend.direction = "horizontal", legend.text = element_text(face = "plain", size = 15), legend.title = element_blank())
+legend <-  get_legend(legend_plot) 
+plot_grid(legend)
+
+title_y <- ggdraw() + draw_label("Expression (VST)", fontface='plain', size = 20, angle = 90)
+title_x <- ggdraw() + draw_label("Samples", fontface='plain', size = 20)
+
+p1 <- plot_grid(title_y, plotlist = plots, nrow = 1, rel_widths = c(0.1,rep(0.9,6))) 
+p2 <- plot_grid(p1, title_x, nrow = 2, rel_heights = c(0.9, 0.1))
+marker_genes_plot <- plot_grid(legend, p2 ,nrow = 2, rel_heights= c(0.1,0.9))
+
+marker_genes_plot
+pdf("marker_genes.pdf", width = 20, height = 5)
+marker_genes_plot
+dev.off()
+
+```
+
+
+**Assembling fig 1**
+
+```{r}
+
+library(patchwork)
+pdf("Fig1.pdf", width = 20, height = 10)
+plot_spacer()/pca_plot/plot_spacer()/marker_genes_plot +plot_layout(heights = c(0.1,0.9, 0.1,0.9)) + plot_annotation(tag_levels = 'A')& theme(plot.tag = element_text(size = 30))
+dev.off()
+
+```
+
+
+
+# Upset plots
+
+
+```{r message=FALSE, warning=FALSE}
+
+species_list_full_names <- c("Lodgepole pine", "Aspen", "Norway spruce","Scots pine","Birch","Cherry")
+species_lat_name <- c("P. contorta", "P. tremula", "P. abies", "P. sylvestris", "B. pendula", "P. avium")
+
+# ------ Read ORTHOGROUPS and create binary df based on presence/absence of ortholog ------
+ortholog_group_file <- read.delim(ORTHOLOG_GROUP_FILE, header = TRUE, sep = "\t")
+ortho_general_filtering <- ortholog_group_file %>%
+  mutate(Pinus_sylvestris_cp = Pinus_sylvestris) %>% 
+  rename(
+    `P. tremula` = Populus_tremula,
+    `B. pendula` = Betula_pendula,
+    `P. abies` = Picea_abies,
+    `P. sylvestris` = Pinus_sylvestris,
+    `P. avium`= Prunus_avium,
+    `P. contorta` = Pinus_sylvestris_cp) %>% 
+  select(OrthoGroup, all_of(species_lat_name))
+
+
+ortho_seq_all <- ortho_general_filtering 
+
+rownames(ortho_seq_all) <- ortho_seq_all$OrthoGroup
+ortho_seq_all <- ortho_seq_all %>% 
+  select(-(1)) 
+  
+ortho_seq_all[is.na(ortho_seq_all)] <-0
+ortho_seq_all[ortho_seq_all != 0] <-1
+
+ortho_seq_all <- ortho_seq_all %>% 
+  mutate_if(is.character, as.integer)
+
+
+col_order_singles <- c("P. tremula", "B. pendula", "P. avium"  , "P. abies", "P. sylvestris","P. contorta" )
+
+# ------ Plot ORTHOGROUPS ------
+upset_plot <- upset(ortho_seq_all,
+      sets = rev(col_order_singles),
+      mainbar.y.label = "Orthogroups",
+      sets.x.label = " ",
+      queries = list(
+        list(query = intersects, params = list("P. tremula", "B. pendula", "P. avium"), color = "#FC8D62", active = T),
+                     list(query = intersects, params = list("P. sylvestris", "P. contorta", "P. abies"), color = "#66C2A5", active = T)),
+      nintersects = 7,
+      keep.order = T,
+      order.by = "freq",
+      decreasing = T,
+      set_size.show = F,
+      text.scale = c(3, 3, 2, 2, 3, 3), # c(intersection size title, intersection size tick labels, set size title, set size tick labels, set names, numbers above bars)
+      point.size = 3.5,
+      line.size = 1.5,
+      mb.ratio = c(0.6, 0.4),
+      sets.bar.color = "white"
+      ) 
+
+pdf("upset_small.pdf", height = 7, width = 10)
+upset_plot 
+dev.off()
+
+# ------ Data frame for EXPRESSED ORTHOGROUPS ------
+
+df <- ortholog_group_file %>%
+  mutate(Pinus_sylvestris_cp = Pinus_sylvestris) %>%
+  rename(
+    Asp = Populus_tremula,
+    Birch = Betula_pendula,
+    Nor = Picea_abies,
+    Scots = Pinus_sylvestris,
+   Cher = Prunus_avium,
+    Lodge = Pinus_sylvestris_cp) %>%
+  select(OrthoGroup, all_of(species_list))
+
+# expr_pairs <- ortho_general_filtering
+
+for (i in species_list){
+
+  # i <- "Lodge"
+
+  file <- paste0("Data/DATA/transcriptomicsData/",i,"Wood_transcriptomics.txt.gz")
+  expression_data <- read.delim(file,sep = "\t", header = TRUE)
+
+  filtered_genes <- df %>% #all possible orthologs for species
+    separate_rows(i, sep = ", ") %>%
+    select(OrthoGroup, i) %>%
+    rename(species = i)
+
+
+
+    if(i == "Asp"){
+      filtered_genes <- filtered_genes %>%
+        mutate(species = gsub("\\.\\d\\.p\\d$", "", species))
+
+    }
+
+  if(i == "Nor"){
+
+    filtered_genes <- filtered_genes %>%
+      mutate(species = gsub("\\.p\\d$", "", species))
+  }
+
+
+  if(i == "Cher"){
+
+    filtered_genes <- filtered_genes %>%
+      mutate(species = gsub("\\.p\\d$", "", species))
+  }
+
+  genes_without_ortho <- expression_data %>%
+      filter(!(Genes %in% filtered_genes$species))
+
+  filtered_genes <- filtered_genes %>%
+    filter(species %in% expression_data$Genes) %>%
+    group_by(OrthoGroup) %>%
+    slice(1)
+
+  species_col <- df %>%
+    left_join( filtered_genes,join_by(OrthoGroup == OrthoGroup)) %>%
+      select(species)
+
+  col_renamed <- as.character(paste0(i, "_"))
+  colnames(species_col) = col_renamed
+    # print(paste0("Length after joining: ",nrow(new_column)))
+
+    df <- cbind(df, species_col)
+
+}
+
+expr_og <- rownames(df) # NEED TO REMOVE ORTHOGROUPS THAT HAVE NO EXPRESSED GENES
+
+expressed_orthos <- df %>%
+  column_to_rownames(var = "OrthoGroup") %>% 
+  select(-c(1:6)) %>% 
+    rename(
+    `P. tremula` = Asp_, 
+    `B. pendula` = Birch_,
+    `P. abies` = Nor_,
+    `P. sylvestris` = Scots_,
+    `P. avium`= Cher_,
+    `P. contorta` = Lodge_ ) 
+
+
+expressed_orthos[is.na(expressed_orthos)] <- 0
+expressed_orthos[expressed_orthos != 0] <-1
+
+expressed_orthos <- expressed_orthos %>%
+  mutate_if(is.character, as.integer) 
+nrow(expressed_orthos)
+
+expressed_orthos <- expressed_orthos[rowSums(expressed_orthos)>0,]
+nrow(expressed_orthos)
+
+
+# ------ Plot EXPRESSED ORTHOGROUPS ------
+
+col_order_singles <- c("P. tremula", "B. pendula", "P. avium"  , "P. abies", "P. sylvestris","P. contorta" )
+
+upset_plot <- upset(expressed_orthos,
+      sets = rev(col_order_singles),
+      mainbar.y.label = "Expressed orthogroups",
+      queries = list(
+        list(query = intersects, params = list("P. tremula", "B. pendula", "P. avium"), color = "#FC8D62", active = T),
+                     list(query = intersects, params = list("P. sylvestris", "P. contorta", "P. abies"), color = "#66C2A5", active = T)),
+      nintersects = 20,
+      keep.order = T,
+      order.by = "freq",
+      decreasing = T,
+      set_size.show = F,
+      number.angles = 0,
+      text.scale = c(3, 3, 2, 2, 3, 3), 
+      set_size.scale_max = 15000,
+      point.size = 3,
+      line.size = 1,
+      mb.ratio = c(0.7, 0.3)
+      
+      ) 
+
+
+pdf("upset_big.pdf", height = 9, width = 20)
+upset_plot 
+dev.off() 
+
+
+```
+
+
+# Co-expressolog counts (heatmaps)
+
+ 
+```{r fig.height= 8, fig.width= 10}
+
+ 
+species_list <- c("Lodge", "Asp", "Nor","Scots","Birch","Cher")
+combo <- data.frame(t(combn(species_list, 2)))
+
+file_list_1 <- c()
+for (i in 1:nrow(combo)){
+
+  s1 <- combo[i, "X1"]
+  s2 <- combo[i, "X2"]
+
+  file_name <- paste0("Data/DATA/comparisonFiles/comparison-",s1,"_",s2,"-pearsonMR0.03no-table-",VER,".RData")
+  file_list_1 <- append(file_list_1, file_name, after = length(file_list_1))
+
+}
+
+# ------ Filter comparison files for co-expressologs ------
+orthogroups_with_coexp <- c()
+p_thr <- 0.1
+
+
+for (x in file_list_1){
+  if(file.exists(x)){
+    load(x)
+    
+    genes <- comparison_table %>%
+      as.data.frame() %>% 
+      mutate_at("Max.p.val", as.numeric) %>% 
+      select(1:8)
+    
+    number_of_coexpressologs <- genes %>%
+      filter(Max.p.val < p_thr) %>%
+      nrow()
+
+    number_of_orthologs <- genes %>%
+      filter(Max.p.val < p_thr) %>%
+      group_by(OrthoGroup) %>%
+      slice(1) %>%
+      nrow()
+    
+    key_word_s1 <- sapply(strsplit(x, "_"), "[",1) 
+    key_word_s1 <- sapply(strsplit(key_word_s1, "-"), "[",2) 
+    key_word_s2 <- sapply(strsplit(x, "_"), "[",2)
+    key_word_s2 <- sapply(strsplit(key_word_s2, "-"), "[",1) 
+    species_pair <- paste0(key_word_s1, "-", key_word_s2)
+    
+    print(paste0(species_pair, ": ", number_of_orthologs," (", number_of_coexpressologs, ")" ," orthogroups with co-expressologs (total)"))
+    
+    genes <- cbind(genes, pair = rep(species_pair, nrow(genes)), orthologs = rep(number_of_orthologs, nrow(genes)), co_expressologs = rep(number_of_coexpressologs, nrow(genes)))
+    
+    orthogroups_with_coexp <- rbind(orthogroups_with_coexp, genes) 
+    
+  }
+}
+
+orthogroups_with_coexp <- orthogroups_with_coexp %>% 
+  arrange(OrthoGroup)
+
+# Fill-in order: "Lodge-Asp", "Lodge-Birch", "Lodge-Cher", "Lodge-Nor", "Lodge-Scots", "Asp-Scots", "Scots-Birch", "Scots-Cher","Nor-Scots", NA, "Asp-Nor","Nor-Birch", "Nor-Cher", NA, NA, "Asp-Cher","Birch-Cher",NA,NA, NA, "Asp-Birch, NA,NA, NA,NA
+
+x <- c("P. tremula", "B. pendula", "P. avium", "P. abies", "P. sylvestris")
+y <-c("P. contorta", "P. sylvestris", "P. abies", "P. avium", "B. pendula")
+
+# ------ Data frame with number of ORTHOLOGS WITH CO-EXPRESSOLOGS ------
+data <- expand.grid(X=x, Y=y)
+data$Orthologs <- c(
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Asp") %>% slice(1) %>%  pull(orthologs),   
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Birch") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Cher") %>% slice(1) %>%  pull(orthologs),  
+   orthogroups_with_coexp %>% filter(pair == "Lodge-Nor") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Scots") %>% slice(1) %>%  pull(orthologs),
+   orthogroups_with_coexp %>% filter(pair == "Asp-Scots") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Scots-Birch") %>% slice(1) %>%  pull(orthologs),
+  orthogroups_with_coexp %>% filter(pair == "Scots-Cher") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Scots") %>% slice(1) %>%  pull(orthologs), NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Nor") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Birch") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Cher") %>% slice(1) %>%  pull(orthologs), NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Cher") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Birch-Cher") %>% slice(1) %>%  pull(orthologs), NA,NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Birch") %>% slice(1) %>%  pull(orthologs), NA,NA, NA,NA)
+
+
+# ------ Data frame with TOTAL number of CO-EXPRESSOLOGS ------
+data$`Co-expressologs` <- c(
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Asp") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Birch") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Cher") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Nor") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Scots") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Scots") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Scots-Birch") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Scots-Cher") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Nor-Scots") %>% slice(1) %>%  pull(co_expressologs), NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Nor") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Nor-Birch") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Cher") %>% slice(1) %>%  pull(co_expressologs), NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Cher") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Birch-Cher") %>% slice(1) %>%  pull(co_expressologs), NA,NA, NA,
+  orthogroups_with_coexp %>% filter(pair == "Asp-Birch") %>% slice(1) %>%  pull(co_expressologs), NA,NA, NA,NA)
+
+
+# tile <- ggplot(data, aes(x = X, y = Y, fill = `Co-expressologs`)) + geom_tile(color = "white", linewidth = 2) + scale_fill_distiller(palette = "YlOrRd", direction = 1 ,na.value = "white") + geom_text(aes(label = `Co-expressologs`), na.rm = T, color = "black", size = 5) + theme_minimal() + theme(axis.text = element_text(size = 16, face = "italic", color = "black"), axis.title = element_blank(), legend.position = "none", axis.text.x = element_text(angle = 40, vjust = 1, hjust = 0.9)) 
+# 
+# tile
+text_color <- data %>% arrange(desc(Orthologs)) %>%  mutate(txtCol = c("white", rep("black", 14), rep("NA",10))) 
+text_color <- text_color$txtCol[1:15]
+
+tile <- ggplot(data, aes(x = X, y = Y, fill = Orthologs)) + geom_tile(color = "white", linewidth = 2) + scale_fill_distiller(palette = "Blues", direction = 1, na.value = "white") + geom_text(data = data[!(is.na(data$Orthologs)),], aes(label = paste0(Orthologs,"\n", "(",`Co-expressologs`, ")")),color = text_color, na.rm = F,size = 5) + geom_text(data = data[is.na(data$Orthologs),] ,aes(label = Orthologs),color = "white", na.rm = T,size = 5) + theme_minimal() + theme(axis.text = element_text(size = 16, face = "italic", color = "black"), axis.title = element_blank(), legend.position = "none", axis.text.x = element_text(angle = 40, vjust = 1, hjust = 0.9))
+
+pdf("co_expressologs_hm.pdf", height = 7, width = 7)
+tile
+dev.off()
+# Dim: 3000 x 2200
+
+```
+
+
+# Supplement figs
+
+**PCA single trees (all specimens)(Suppl. fig??)**
+
+```{r}
+
+plots <- list()
+for(i in 1:length(species_list)){
+  
+  # i <- 1  
+  species <- species_list[i]
+  species_short <- species_list[i]
+  latin_name <- species_lat_name[i]
+  
+  print(species)
+  file <- paste0("Data/DATA/transcriptomicsData/",species,"Wood_transcriptomics.txt.gz")
+  
+  expr.wide <- read.delim(file, sep = "\t") %>% 
+    column_to_rownames("Genes")
+  
+  n <- ncol(expr.wide)
+  
+  # ------ Cluster samples ------
+
+  cdist <- as.dist(1-cor(expr.wide, method="pearson"))
+  chc <- hclust(cdist,method="ward.D2")
+  cdendro <- as.dendrogram(chc)
+  
+  order <- rep(0, n)
+  h <- colnames(expr.wide)
+  z <- strsplit(as.character(h), "[.]")
+  h <- unlist(lapply(z,"[",2))
+  h <- as.integer(h)
+  k <- 1
+  for(i in 1:max(ncol(expr.wide))) {
+    for(j in 1:n) {
+      if (h[j] == i) {
+        order[j] = k
+        k <- k+1
+      }
+    }
+  }
+  cdendro <- reorder(cdendro, order, agglo.FUN = mean)
+  chc <- as.hclust(cdendro)
+
+  cnclust = 4
+  cct <- cutree(chc, k=cnclust)
+  colsamples <- c("#A3CC51","#51A3CC","#CC5151","#B26F2C")
+  ccol <- colsamples[cct]
+  
+  #  ------ PCA ------
+  pc <- prcomp(t(expr.wide))
+  
+  var.expl <- pc$sdev^2 / sum(pc$sdev^2)
+  p <- cbind(pc$x, data.frame(Clusters = as.factor(cct),
+                              Samples = rownames(pc$x)))
+  
+  # ------ Plot ------
+  
+  title_pdf <- paste0("PCA_",species,".pdf")
+  pdf(title_pdf, width = 20, height = 10)
+  print(ggplot(p, aes(PC1, PC2, col = Clusters)) + 
+          xlab(paste0("PC1 (", round(var.expl[1], digits=2),")")) +
+          ylab(paste0("PC2 (", round(var.expl[2], digits=2),")")) +
+          geom_point(size = 4, alpha = 0.5) +
+          geom_label_repel(aes(label = Samples), box.padding=0.03, point.padding=0.01, segment.color='grey50', label.size=0.3, size= 3, max.overlaps = 20, force = 1) +
+          theme_bw() +
+          ggtitle(latin_name)+
+          scale_color_manual(values=colsamples) +
+          theme(legend.position = "none",plot.title = element_text(face = "italic"), 
+                text=element_text(size=20), axis.text = element_text(size = 10))) 
+  
+  
+  dev.off()
+
+}
+
+# plots[[1]]+plots[[2]]/plots[[3]]+plots[[4]]/plots[[5]]+plots[[6]] 
+
+```
+
+
+**Expression heatmaps (Suppl . fig 1)**
+
+```{r}
+
+species_lat_name <- c("P. contorta", "P. tremula", "P. abies", "P. sylvestris", "B. pendula", "P. avium")
+
+# gene_cluster_colours <- list(c("#CC5151", "darkred", "mediumpurple3", "#B26F2C", "#A3CC51", "orange", "#51A3CC"), 
+#                              c("#A3CC51", "lightsteelblue3", "#51A3CC", "mediumpurple3", "#CC5151", "#B26F2C", "darkred", "orange"), 
+#                              c("darkred", "mediumpurple3","#B26F2C", "black", "#A3CC51", "lightsteelblue3", "#51A3CC"), 
+#                              c("darkred", "mediumpurple3", "#CC5151", "#B26F2C","orange", "#A3CC51", "#51A3CC"), 
+#                              c("#B26F2C", "orange", "#A3CC51", "lightsteelblue3", "darkred" , "darkred", "#51A3CC", "mediumpurple3"), 
+#                              c("#CC5151", "#51A3CC", "#A3CC51", "lightsteelblue3", "black", "darkred", "#B26F2C", "orange"))
+# names(gene_cluster_colours) <- c("Lodge", "Asp", "Nor","Scots","Birch","Cher")
+
+
+colorR <- colorRampPalette(c("blue","white","red"))(20)
+sample_colours <- c("#A3CC51","#51A3CC","#CC5151","#B26F2C")
+
+```
+
+```{r}
+
+species_list <- c("Lodge", "Asp", "Nor","Scots","Birch","Cher")
+
+# ------- INSERT SPECIES INDEX -------
+i <- 6 # element i in species_list
+
+species <- species_list[i]
+latin_name <- species_lat_name[i]
+colgenes <- gene_cluster_colours[[i]]
+
+
+# ------- Read expression file -------
+file <- paste0("Data/DATA/transcriptomicsData/",species,"Wood_transcriptomics.txt.gz")
+expressed_genes <- read.delim(file, sep = "\t") %>% 
+  column_to_rownames("Genes") %>%
+  as.matrix()
+
+# ------- Cluster and order SAMPLES -------
+cdist <- as.dist(1-cor(expressed_genes, method="pearson"))
+chc <- hclust(cdist,method="ward.D2")
+cdendro <- as.dendrogram(chc)
+n <- ncol(expressed_genes)
+order <- rep(0, n)
+h <- colnames(expressed_genes)
+z <- strsplit(as.character(h), "[.]")
+h <- unlist(lapply(z,"[",2))
+h <- as.integer(h)
+k <- 1
+
+for(i in 1:ncol(expressed_genes)) {
+  for(j in 1:n) {
+    if (h[j] == i) {
+      order[j] = k
+      k <- k+1
+    }
+  }
+}
+cdendro <- reorder(cdendro, order, agglo.FUN = mean)
+chc <- as.hclust(cdendro)
+
+cnclust = 4
+cct <- cutree(chc, k=cnclust)
+colsamples <- sample_colours
+ccol <- colsamples[cct]
+saveRDS(cct,paste0("Data/DATA/cct_", species, ".RDS"))
+
+
+# ------- Cluster and order GENES -------
+rdist <- as.dist(1-cor(t(expressed_genes), method="pearson"))
+rhc <- hclust(rdist,method="ward.D2")
+rdendro <- as.dendrogram(rhc)
+
+rnclust = length(colgenes)
+rct <- cutree(rhc, k=rnclust)
+
+c <- 0
+prev <- 0
+ct <- rct
+for (j in nrow(expressed_genes):1) {
+  g <- rhc$order[j]
+  if (rct[g] != prev) {
+    c <- c + 1
+    prev <- rct[g]
+  }
+  ct[g] <- c
+}
+rct <- ct
+rcol <- colgenes[rct]
+
+
+# ------- Add vertical bars to separate trees -------
+
+cbreaks2 <- sub("^.(\\d+)\\..*", "\\1", colnames(expressed_genes))
+
+if(length(unique(cbreaks2)) == 3){
+  br1 <- length(cbreaks2[cbreaks2 == 1])
+  br2 <- br1 + length(cbreaks2[cbreaks2 == 2])
+  
+  cuts <- append(br1, br2)
+  
+}else{
+  br1 <- length(cbreaks2[cbreaks2 == 1])
+  br2 <- br1 + length(cbreaks2[cbreaks2 == 2])
+  br3 <- br2 + length(cbreaks2[cbreaks2 == 3])
+  
+  cuts <- append(br1, br2)
+  cuts <- append(cuts, br3)
+  
+}
+
+
+# ------- Plot heatmap -------
+par(cex.main = 2)
+hm <- heatmap.2(as.matrix(expressed_genes),
+                Rowv = rdendro,
+                Colv = FALSE,
+                colsep = cuts,
+                sepcolor = "black",
+                dendrogram = "row",
+                scale = "row",
+                margins = c(5, 5),
+                trace = "none",
+                cexCol = 0.8,
+                labRow = rep("", nrow(expressed_genes)),
+                main = latin_name,
+                xlab = NULL, ylab = NULL,
+                col = colorR,
+                key=FALSE, keysize=1, density.info = "none",
+                ColSideColors = ccol,
+                RowSideColors = rcol
+)
+
+
+```
+
+**TRH ver**
+
+```{r}
+
+species <- "Lodge"
+full_name <- "P. contorta"
+file <- paste0("Data/DATA/transcriptomicsData/",species,"Wood_transcriptomics.txt.gz")
+
+expr.wide <- read.delim(file, sep = "\t") %>% 
+  column_to_rownames("Genes") %>%
+  as.matrix()
+
+n <- ncol(expr.wide)
+
+# Cluster samples
+cdist <- dist(t(expr.wide), method="euclidean")
+chc <- hclust(cdist,method="ward.D2")
+cdendro <- as.dendrogram(chc)
+
+order <- rep(0, n)
+h <- colnames(expr.wide)
+z <- strsplit(as.character(h), "[.]")
+h <- unlist(lapply(z,"[",2))
+h <- as.integer(h)
+k <- 1
+for(i in  1:ncol(expr.wide)) { # 1:max(expr.long$Samples) - the same??
+  for(j in 1:n) {
+     if (h[j] == i) {
+       order[j] = k
+      k <- k+1
+    }
+  }
+}
+cdendro <- reorder(cdendro, order, agglo.FUN = mean)
+chc <- as.hclust(cdendro)
+#plot(cdendro)
+
+cnclust = 4
+cct <- cutree(chc, k=cnclust)
+colsamples <- c("#A3CC51","#51A3CC","#CC5151","#B26F2C")
+ccol <- colsamples[cct]
+
+cbreaks = c()
+for (i in 1:(cnclust-1)) {
+  cbreaks[i] <- sum(cct <= i)
+}
+
+# Cluster genes
+rdist <- as.dist(1-cor(t(expr.wide), method="pearson"))
+rhc <- hclust(rdist,method="ward.D2")
+rdendro <- as.dendrogram(rhc)
+
+rnclust = 8
+rct <- cutree(rhc, k=rnclust)
+#colgenes <- c("gray8","#A3CC51","orange","#B26F2C","#51A3CC","lightsteelblue3","#CC5151","mediumpurple3")
+
+#colgenes <- c("lightsteelblue3", "#A3CC51", "#51A3CC", "#92d1f0", "orange", "#B26F2C", "mediumpurple3", "#CC5151")
+colgenes <- c("orange", "#92d1f0", "#A3CC51", "#B26F2C", "lightsteelblue3", "#51A3CC", "mediumpurple3", "#CC5151")
+
+c <- 0
+prev <- 0
+ct <- rct
+for (j in nrow(expr.wide):1) {
+  g <- rhc$order[j]
+  if (rct[g] != prev) {
+    c <- c + 1
+    prev <- rct[g]
+  }
+  ct[g] <- c
+}
+rct <- ct
+
+if (FALSE) {
+  rct <- gsub("\\<2\\>", 1, rct)
+  rct <- gsub("\\<3\\>", 1, rct)
+  rct <- gsub("\\<4\\>", 1, rct)
+  rct <- gsub("\\<5\\>", 2, rct)
+  rct <- gsub("\\<6\\>", 3, rct)
+  rct <- gsub("\\<7\\>", 4, rct)
+  rct <- gsub("\\<8\\>", 5, rct)
+  rct <- gsub("\\<9\\>", 6, rct)
+  rct <- gsub("\\<10\\>", 7, rct)
+  rct <- gsub("\\<11\\>", 8, rct)
+  rct <- gsub("\\<12\\>", 9, rct)
+  rct <- gsub("\\<13\\>", 10, rct)
+  rct <- gsub("\\<14\\>", 11, rct)
+  rct <- gsub("\\<15\\>", 12, rct)
+  rct <- gsub("\\<16\\>", 13, rct)
+  rct <- as.integer(ct)
+  rnclust <- 13
+}
+
+rcol <- colgenes[rct]
+
+colorR <- colorRampPalette(c("blue","white","red"))(20)
+
+cbreaks2 <- sub("^.(\\d+)\\..*", "\\1", colnames(expr.wide))
+
+if(length(unique(cbreaks2)) == 3){
+  br1 <- length(cbreaks2[cbreaks2 == 1])
+  br2 <- br1 + length(cbreaks2[cbreaks2 == 2])
+  
+  cuts <- append(br1, br2)
+  
+}else{
+  br1 <- length(cbreaks2[cbreaks2 == 1])
+  br2 <- br1 + length(cbreaks2[cbreaks2 == 2])
+  br3 <- br2 + length(cbreaks2[cbreaks2 == 3])
+  
+  cuts <- append(br1, br2)
+  cuts <- append(cuts, br3)
+  
+}
+
+h2 <- heatmap.2(as.matrix(expr.wide),
+        Rowv = rdendro,
+        Colv = FALSE,
+        colsep = cuts,
+        sepcolor = "black",
+        dendrogram = "row",
+        scale = "row",
+        margins = c(5, 5), 
+        trace = "none",
+        cexRow = 0.2,
+        cexCol = 0.5,
+        labRow = rep("", nrow(expr.wide)), 
+        labCol = colnames(expr.wide),
+        main = full_name,
+        xlab = NULL, ylab = NULL,
+        col = colorR,
+        key=FALSE, keysize=1, density.info = "none",
+        ColSideColors = ccol,
+        RowSideColors = rcol
+)
+
+```
+
+
+
+
