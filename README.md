@@ -55,6 +55,6 @@ Then run either aspen/aspen_GRN.R or spruce/spruce_GRN.R to create the GRNs.
    ii. **PartialCliques.R** - identifies partially conserved genes in two batches: the code starts with removing OGs with complete 6M cliques in order to identity partial 6M cliques (partially significant), then identifies 5M complete cliques (partially present) from
    CompleteCliquesAlgo.R
 
-   iii. **DifferentiatedCliques.R** - removes OGs with conserved, partially conserved, and lineage-specific genes. Identifies cliques with co-expressologs between speciec within the lineages and between no more than four of the inter-lineage pairs.
+   iii. **DifferentiatedCliques.R** - removes OGs with conserved, partially conserved, and lineage-specific genes. Identifies cliques with co-expressologs between species within the lineages and between no more than four of the inter-lineage pairs.
 
 
