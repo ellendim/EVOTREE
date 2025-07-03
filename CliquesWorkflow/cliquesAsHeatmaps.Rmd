@@ -1,0 +1,188 @@
+---
+title: "Heatmaps of conserved genes"
+author: "Ellen Dimmen Chapple"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: lumen
+editor_options:
+  chunk_output_type: console
+---
+
+```{r libraries, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(gplots)
+library(cowplot)
+library(circlize)
+library(gdata)
+library(ComplexHeatmap)
+
+
+dir <- "../"
+species_list <- c("Asp", "Birch","Cher",  "Nor", "Scots", "Lodge") 
+
+```
+
+
+# Heatmap with only cliques (fig 3B)
+
+```{r message=FALSE, warning=FALSE}
+
+species_lat_name <- c("P. tremula", "B. pendula","P. avium" , "P. abies", "P. sylvestris", "P. contorta")
+sample_colours <- c("#A3CC51","#51A3CC","#CC5151","#B26F2C")
+heatmap_cols <-  colorRamp2(c(-2,0,2), c("blue", "white", "red"))
+
+
+# ----- Creating a combined expression matrix with only clique genes
+
+genes_complete <- readRDS(paste0(dir,"DATA/cliqueOutput/conserved_genes_COMPLETE_wider.RDS"))
+genes_partial <- readRDS(paste0(dir, "DATA/cliqueOutput/conserved_genes_PARTIAL_wider.RDS")) %>% filter(conservedType == "partiallySign") %>% select(-(OriginalCliqueSize))
+
+genes <- rbind(genes_complete, genes_partial)
+template <- genes %>% select( cliqueID)
+
+sample_clusters <- c()
+for (i in species_list){
+ 
+  file <- paste0(dir,i,"Wood/", i,"Wood_transcriptomics.txt.gz")
+  
+  x <- read_delim(file, show_col_types = FALSE) %>%
+    select(Genes, contains("1."))
+  
+  conserved_genes_one_species <- genes %>% 
+    select(cliqueID, i) %>% 
+    rename(Genes = i)
+  
+  expr <- x %>% 
+    filter(Genes %in% conserved_genes_one_species$Genes)
+  
+  cat(i, ": ", nrow(expr), " expressed genes.", "\n")
+  
+  # Scale each expression file before combining
+  scaled_data <- t(scale(t(expr[,-1]), center = T, scale = T))
+  scaled_data[is.nan(scaled_data)] <-0 
+  
+  scaled_data_with_genes <- cbind(Genes = expr$Genes, scaled_data)
+  scaled_genes_to_cliques <- conserved_genes_one_species %>% 
+    left_join(as.data.frame(scaled_data_with_genes), by = "Genes") %>% 
+    distinct(Genes, .keep_all = T) %>% 
+    select(-Genes)
+  
+  template <- template %>% 
+    left_join(scaled_genes_to_cliques, by = "cliqueID")
+  
+ 
+  ncol <- ncol(expr)-1
+  cct <- readRDS(paste0(dir,"DATA/sampleClusters/cct_", i, ".RDS"))
+  cct <- cct[1:ncol]
+  sample_clusters <- append(sample_clusters, cct)
+  
+}
+
+
+combined_expression_matrix <- template %>% 
+  column_to_rownames("cliqueID") %>% 
+  select(c(contains("A"), contains("B"), contains("C"), contains("N"), contains("S"), contains("L")))%>%
+  mutate_if(is.character, as.numeric) %>% 
+  na.omit() 
+
+cat("Number of cliques presented in heatmap: ",nrow(combined_expression_matrix) )
+
+# cluster rows (across all species)
+rdist <- as.dist(1-cor(t(combined_expression_matrix), method="pearson"))
+rhc <- hclust(rdist,method="ward.D2")
+rdendro <- as.dendrogram(rhc)
+
+rnclust = 8
+rct <- cutree(rhc, k=rnclust)
+
+c <- 0
+prev <- 0
+ct <- rct
+for (j in nrow(combined_expression_matrix):1) {
+  g <- rhc$order[j]
+  if (rct[g] != prev) {
+    c <- c + 1
+    prev <- rct[g]
+  }
+  ct[g] <- c
+}
+
+rct <- ct
+rct <- sort(rct)
+row_order <- names(rct)
+
+# Change row order 
+combined_expression_matrix <- combined_expression_matrix %>% 
+  rownames_to_column(var = "cliqueID")
+
+
+combined_expression_matrix <- combined_expression_matrix[match(row_order, combined_expression_matrix$cliqueID),]
+combined_expression_matrix <- as.matrix(combined_expression_matrix[,-1])
+
+
+# Split columns by species
+column_split <- rep("A", 163)
+column_split[26:53] <- "B"
+column_split[54:80] <- "C"
+column_split[81:107] <- "N"
+column_split[108:135] <- "S"
+column_split[136:163] <- "L"
+
+           
+# ------- Sample annotation -------
+ha = HeatmapAnnotation(
+  Samples = unname(sample_clusters),
+  col = list(Samples = c( "1"="#A3CC51","2"="#51A3CC","3"="#CC5151","4"="#B26F2C")),
+  simple_anno_size = unit(1, "cm"),
+  show_legend = F,
+  show_annotation_name = F,
+  height = unit(3, "mm")
+)
+
+# ------ Row annotation --------
+
+ra = rowAnnotation(
+  Samples = rct,
+  col = 
+    list(Samples = c("3" = "#B26F2C","1" = "darkred","2" = "#cc5151", "8" = "#A3CC51", "6" = "#51A3CC", "7" = "#034e7b" ,  "4" ="chocolate4", "5" ="mediumpurple3")),
+  simple_anno_size = unit(0.8, "cm"),
+  show_legend = F,
+  show_annotation_name = F,
+  width = unit(1, "mm"))
+
+# ------ Print heatmap -----
+hm <-Heatmap(combined_expression_matrix,
+        show_column_names = F,
+        cluster_rows = F,
+        show_row_dend = F,
+        column_title =   species_lat_name,
+        column_title_side = "bottom",
+        show_column_dend = FALSE,
+        column_title_gp = gpar(fontsize = 13, fontface = "italic"  ,fill = "white", border = "white" ),
+        column_names_gp = gpar(fontsize = 5),
+        show_row_names = F,
+        top_annotation = ha,
+        column_order = 1:ncol(combined_expression_matrix),
+        row_order = 1:nrow(combined_expression_matrix),
+        show_heatmap_legend = F,
+        col = heatmap_cols,
+        column_split = column_split,
+        column_gap = unit(1, "mm"),
+        left_annotation = ra)
+
+hm
+
+pdf(paste0(dir,"Figures/hm_conserved_genes.PDF"), height = 4, width= 8)
+hm
+dev.off()
+
+
+
+```
+

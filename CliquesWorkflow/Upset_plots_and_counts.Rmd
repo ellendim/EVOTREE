@@ -1,0 +1,327 @@
+---
+title: "Upset plots (OGs) and co-expressolog counts"
+author: "Ellen Dimmen Chapple"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    number_sections: true
+    toc_float: true
+    theme: lumen
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(tidyverse)
+# library(stats)
+library(UpSetR)
+
+
+# Run version of ComPlEx
+VER <- "V5" # Run version of ComPlEx
+rootDir <- "../"
+ORTHOLOG_GROUP_FILE <-paste0(rootDir,"DATA/OrthoGroups/Orthogroups_20240823_clean_N1.tsv.gz")
+
+species_list <- c( "Asp", "Birch","Cher","Nor", "Scots", "Lodge") 
+species_lat_name <- c("P. tremula","B. pendula","P. avium", "P. abies", "P. sylvestris","P. contorta" )
+col_order_singles <- c("P. tremula", "B. pendula", "P. avium"  , "P. abies", "P. sylvestris","P. contorta" )
+
+```
+
+
+## Upset plots of orthogroups (fig 2A)
+
+```{r message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+
+# --- Plot 1: Presence of ortholog in orthogroup for each species ---
+
+ortholog_group_file <- read.delim(ORTHOLOG_GROUP_FILE, header = TRUE, sep = "\t")
+
+ortho_general_filtering <- ortholog_group_file %>%
+  mutate(Pinus_sylvestris_cp = Pinus_sylvestris) %>% 
+  rename(
+    `P. tremula` = Populus_tremula,
+    `B. pendula` = Betula_pendula,
+    `P. abies` = Picea_abies,
+    `P. sylvestris` = Pinus_sylvestris,
+    `P. avium`= Prunus_avium,
+    `P. contorta` = Pinus_sylvestris_cp) %>% 
+  select(OrthoGroup, all_of(species_lat_name))
+
+
+ortho_seq_all <- ortho_general_filtering 
+
+rownames(ortho_seq_all) <- ortho_seq_all$OrthoGroup
+ortho_seq_all <- ortho_seq_all %>% 
+  select(-(1)) 
+  
+ortho_seq_all[is.na(ortho_seq_all)] <-0
+ortho_seq_all[ortho_seq_all != 0] <-1
+
+ortho_seq_all <- ortho_seq_all %>% 
+  mutate_if(is.character, as.integer)
+
+upset_plot_OG <- upset(ortho_seq_all,
+      sets = rev(col_order_singles),
+      mainbar.y.label = "Orthogroups",
+      sets.x.label = " ",
+      queries = list(
+        list(query = intersects, params = list("P. tremula", "B. pendula", "P. avium"), color = "#FC8D62", active = T),
+                     list(query = intersects, params = list("P. sylvestris", "P. contorta", "P. abies"), color = "#66C2A5", active = T)),
+      nintersects = 7,
+      keep.order = T,
+      order.by = "freq",
+      decreasing = T,
+      set_size.show = F,
+      text.scale = c(3, 3, 2, 2, 3, 3), 
+      point.size = 3.5,
+      line.size = 1.5,
+      mb.ratio = c(0.6, 0.4),
+      sets.bar.color = "white"
+      ) 
+
+pdf(paste0(rootDir,"Figures/upset_orthogroups.pdf"), height = 7, width = 10)
+upset_plot_OG
+dev.off()
+
+# --- Plot 2: Expressed ortholog in orthogroup per species ---
+df <- ortholog_group_file %>%
+  mutate(Pinus_sylvestris_cp = Pinus_sylvestris) %>%
+  rename(
+    Asp = Populus_tremula,
+    Birch = Betula_pendula,
+    Nor = Picea_abies,
+    Scots = Pinus_sylvestris,
+   Cher = Prunus_avium,
+    Lodge = Pinus_sylvestris_cp) %>%
+  select(OrthoGroup, all_of(species_list))
+
+for (i in species_list){
+
+  # i <- "Lodge"
+
+  file <- paste0(rootDir,i,"Wood/", i,"Wood_transcriptomics.txt.gz")
+  expression_data <- read.delim(file,sep = "\t", header = TRUE)
+
+  filtered_genes <- df %>% #all possible orthologs for species
+    separate_rows(i, sep = ", ") %>%
+    select(OrthoGroup, i) %>%
+    rename(species = i)
+
+
+
+    if(i == "Asp"){
+      filtered_genes <- filtered_genes %>%
+        mutate(species = gsub("\\.\\d\\.p\\d$", "", species))
+
+    }
+
+  if(i == "Nor"){
+
+    filtered_genes <- filtered_genes %>%
+      mutate(species = gsub("\\.p\\d$", "", species))
+  }
+
+
+  if(i == "Cher"){
+
+    filtered_genes <- filtered_genes %>%
+      mutate(species = gsub("\\.p\\d$", "", species))
+  }
+
+  genes_without_ortho <- expression_data %>%
+      filter(!(Genes %in% filtered_genes$species))
+
+  filtered_genes <- filtered_genes %>%
+    filter(species %in% expression_data$Genes) %>%
+    group_by(OrthoGroup) %>%
+    slice(1)
+
+  species_col <- df %>%
+    left_join( filtered_genes,join_by(OrthoGroup == OrthoGroup)) %>%
+      select(species)
+
+  col_renamed <- as.character(paste0(i, "_"))
+  colnames(species_col) = col_renamed
+
+    df <- cbind(df, species_col)
+
+}
+
+expr_og <- rownames(df) 
+expressed_orthos <- df %>%
+  column_to_rownames(var = "OrthoGroup") %>%
+  select(-c(1:6)) %>%
+    rename(
+    `P. tremula` = Asp_,
+    `B. pendula` = Birch_,
+    `P. abies` = Nor_,
+    `P. sylvestris` = Scots_,
+    `P. avium`= Cher_,
+    `P. contorta` = Lodge_ )
+
+
+expressed_orthos[is.na(expressed_orthos)] <- 0
+expressed_orthos[expressed_orthos != 0] <-1
+
+expressed_orthos <- expressed_orthos %>%
+  mutate_if(is.character, as.integer)
+
+expressed_orthos <- expressed_orthos[rowSums(expressed_orthos)>0,]
+
+upset_plot_expr <- upset(expressed_orthos,
+      sets = rev(col_order_singles),
+      mainbar.y.label = "Expressed orthogroups",
+      queries = list(
+        list(query = intersects, params = list("P. tremula", "B. pendula", "P. avium"), color = "#FC8D62", active = T),
+                     list(query = intersects, params = list("P. sylvestris", "P. contorta", "P. abies"), color = "#66C2A5", active = T)),
+      nintersects = 20,
+      keep.order = T,
+      order.by = "freq",
+      decreasing = T,
+      set_size.show = F,
+      number.angles = 0,
+      text.scale = c(3, 3, 2, 2, 3, 3), 
+      set_size.scale_max = 15000,
+      point.size = 3,
+      line.size = 1,
+      mb.ratio = c(0.7, 0.3)
+      
+      ) 
+
+
+pdf(paste0(rootDir,"Figures/upset_expressedOGs.pdf"), height = 9, width = 20)
+upset_plot_expr
+dev.off()
+
+upset_plot_OG
+upset_plot_expr
+
+```
+
+
+## Co-expressolog counts (supplementary fig 2A)
+
+```{r fig.height= 8, fig.width= 10}
+
+ 
+species_list <- c("Lodge", "Asp", "Nor","Scots","Birch","Cher")
+combo <- data.frame(t(combn(species_list, 2)))
+
+file_list_1 <- c()
+for (i in 1:nrow(combo)){
+
+  s1 <- combo[i, "X1"]
+  s2 <- combo[i, "X2"]
+
+  file_name <- paste0(rootDir,"DATA/comparisonFiles/comparison-",s1,"_",s2,"-pearsonMR0.03no-table-",VER,".RData")
+  file_list_1 <- append(file_list_1, file_name, after = length(file_list_1))
+
+}
+
+# ------ Filter comparison files for co-expressologs ------
+orthogroups_with_coexp <- c()
+p_thr <- 0.1
+
+for (x in file_list_1){
+  if(file.exists(x)){
+    load(x)
+    
+    genes <- comparison_table %>%
+      as.data.frame() %>% 
+      mutate_at("Max.p.val", as.numeric) %>% 
+      select(1:8)
+    
+    number_of_coexpressologs <- genes %>%
+      filter(Max.p.val < p_thr) %>%
+      nrow()
+
+    number_of_orthologs <- genes %>%
+      filter(Max.p.val < p_thr) %>%
+      group_by(OrthoGroup) %>%
+      slice(1) %>%
+      nrow()
+    
+    key_word_s1 <- sapply(strsplit(x, "_"), "[",1) 
+    key_word_s1 <- sapply(strsplit(key_word_s1, "-"), "[",2) 
+    key_word_s2 <- sapply(strsplit(x, "_"), "[",2)
+    key_word_s2 <- sapply(strsplit(key_word_s2, "-"), "[",1) 
+    species_pair <- paste0(key_word_s1, "-", key_word_s2)
+    
+    genes <- cbind(genes, pair = rep(species_pair, nrow(genes)), orthologs = rep(number_of_orthologs, nrow(genes)), co_expressologs = rep(number_of_coexpressologs, nrow(genes)))
+    
+    orthogroups_with_coexp <- rbind(orthogroups_with_coexp, genes) 
+    
+  }
+}
+
+orthogroups_with_coexp <- orthogroups_with_coexp %>% 
+  arrange(OrthoGroup)
+
+# Fill-in order: "Lodge-Asp", "Lodge-Birch", "Lodge-Cher", "Lodge-Nor", "Lodge-Scots", "Asp-Scots", "Scots-Birch", "Scots-Cher","Nor-Scots", NA, "Asp-Nor","Nor-Birch", "Nor-Cher", NA, NA, "Asp-Cher","Birch-Cher",NA,NA, NA, "Asp-Birch, NA,NA, NA,NA
+
+x <- c("P. tremula", "B. pendula", "P. avium", "P. abies", "P. sylvestris")
+y <-c("P. contorta", "P. sylvestris", "P. abies", "P. avium", "B. pendula")
+
+# ------ Data frame with number of ORTHOLOGS WITH CO-EXPRESSOLOGS ------
+data <- expand.grid(X=x, Y=y)
+data$Orthologs <- c(
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Asp") %>% slice(1) %>%  pull(orthologs),   
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Birch") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Cher") %>% slice(1) %>%  pull(orthologs),  
+   orthogroups_with_coexp %>% filter(pair == "Lodge-Nor") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Scots") %>% slice(1) %>%  pull(orthologs),
+   orthogroups_with_coexp %>% filter(pair == "Asp-Scots") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Scots-Birch") %>% slice(1) %>%  pull(orthologs),
+  orthogroups_with_coexp %>% filter(pair == "Scots-Cher") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Scots") %>% slice(1) %>%  pull(orthologs), NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Nor") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Birch") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Cher") %>% slice(1) %>%  pull(orthologs), NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Cher") %>% slice(1) %>%  pull(orthologs), 
+  orthogroups_with_coexp %>% filter(pair == "Birch-Cher") %>% slice(1) %>%  pull(orthologs), NA,NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Birch") %>% slice(1) %>%  pull(orthologs), NA,NA, NA,NA)
+
+
+# ------ Data frame with TOTAL number of CO-EXPRESSOLOGS ------
+data$`Co-expressologs` <- c(
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Asp") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Birch") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Cher") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Nor") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Lodge-Scots") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Scots") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Scots-Birch") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Scots-Cher") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Nor-Scots") %>% slice(1) %>%  pull(co_expressologs), NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Nor") %>% slice(1) %>%  pull(co_expressologs),
+  orthogroups_with_coexp %>% filter(pair == "Nor-Birch") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Nor-Cher") %>% slice(1) %>%  pull(co_expressologs), NA, NA, 
+  orthogroups_with_coexp %>% filter(pair == "Asp-Cher") %>% slice(1) %>%  pull(co_expressologs), 
+  orthogroups_with_coexp %>% filter(pair == "Birch-Cher") %>% slice(1) %>%  pull(co_expressologs), NA,NA, NA,
+  orthogroups_with_coexp %>% filter(pair == "Asp-Birch") %>% slice(1) %>%  pull(co_expressologs), NA,NA, NA,NA)
+
+text_color <- data %>% arrange(desc(Orthologs)) %>%  mutate(txtCol = c("white", rep("black", 14), rep("NA",10))) 
+text_color <- text_color$txtCol[1:15]
+text_color <- c("black" ,"black" ,"black", "black" ,"black" ,"black" ,"black" ,"black" ,"black" ,"black","white" ,"black" ,"black" ,"black", "black")
+
+tile <- ggplot(data, aes(x = X, y = Y, fill = Orthologs)) + 
+  geom_tile(color = "white", linewidth = 2) + 
+  scale_fill_distiller(palette = "Blues", direction = 1, na.value = "white") + 
+  geom_text(data = data[!(is.na(data$Orthologs)),], aes(label = paste0(Orthologs,"\n", "(",`Co-expressologs`, ")")),color = rev(text_color), na.rm = F,size = 5) + 
+  geom_text(data = data[is.na(data$Orthologs),] ,aes(label = Orthologs),color = "white", na.rm = T,size = 5) + 
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 16, face = "italic", color = "black"), axis.title = element_blank(), legend.position = "none", axis.text.x = element_text(angle = 40, vjust = 1, hjust = 0.9))
+
+# pdf(paste0(rootDir,"Figures/co_expressologs_hm.pdf"), height = 7, width = 7)
+# tile
+# dev.off()
+# Dim: 3000 x 2200
+
+tile
+```
+

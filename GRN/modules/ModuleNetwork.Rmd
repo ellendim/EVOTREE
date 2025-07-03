@@ -1,0 +1,518 @@
+---
+title: "Module Network"
+author: "Torgeir R Hvidsten"
+date: '`r format(Sys.time(), "%d.%m.%Y")`'
+output:
+  html_document:
+    theme: yeti
+    code_folding: hide
+    number_sections: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+options(stringsAsFactors = FALSE)
+
+library(tidyverse)
+theme_set(theme_classic())
+theme_update(plot.title = element_text(face="bold"))
+
+library(gplots)
+library("RColorBrewer")
+library(DT)
+library(cowplot)
+library(matrixStats)
+```
+
+### Set up species and input files
+
+```{r setup}
+
+# Species name in Plaza
+species1_name <- "Asp"
+species2_name <- "Nor"
+
+# Expression files
+species1_expr_file <- "../../AspWood/AspWood_transcriptomics.txt.gz"
+species2_expr_file <- "../../NorWood/NorWood_transcriptomics.txt.gz"
+
+cat("ComPlEX:", species1_name, species2_name, "\n")
+
+```
+
+### Read in data
+
+```{r input, warning=FALSE, error=FALSE, message=FALSE}
+
+
+# Read in expression data
+# =======================
+
+species1_expr <- read.delim(species1_expr_file, sep = "\t", header = TRUE)
+species2_expr <- read.delim(species2_expr_file, sep = "\t", header = TRUE)
+
+species1_expr_long <- species1_expr %>% 
+  gather (Sample.names, Expression, -1) %>%
+  separate(Sample.names, into = c("Trees", "Samples"), sep = "\\.", remove = FALSE) %>%
+  mutate_at("Samples", as.numeric) %>%
+  filter(Trees == "A1") %>% 
+  group_by(Genes) %>%
+  mutate(Expression.scaled = (Expression - mean(Expression))/sd(Expression)) %>% 
+  ungroup()
+
+species2_expr_long <- species2_expr %>% 
+  gather (Sample.names, Expression, -1) %>%
+  separate(Sample.names, into = c("Trees", "Samples"), sep = "\\.", remove = FALSE) %>%
+  mutate_at("Samples", as.numeric) %>%
+  filter(Trees == "N1") %>% 
+  group_by(Genes) %>%
+  mutate(Expression.scaled = (Expression - mean(Expression))/sd(Expression)) %>% 
+  ungroup()
+
+# Read in ComPlEx
+# ===============
+
+cor_method <- "pearson" # pearson spearman
+cor_sign <- "" # abs
+norm_method <- "MR" # CLR MR
+density_thr <- 0.03
+randomize <- "no" # yes no
+
+comparison_RData <- paste0("RData/comparison-", species1_name, "-", species2_name, "-", 
+                           cor_sign, cor_method, norm_method, density_thr, randomize)
+
+load(paste0(comparison_RData, "-table.RData"))
+     
+```
+
+### Compute co-expression networks
+
+```{r coexpression}
+
+if (randomize == "yes") {
+  species1_expr$Genes <- sample(species1_expr$Genes, nrow(species1_expr), FALSE)
+  species2_expr$Genes <- sample(species2_expr$Genes, nrow(species2_expr), FALSE)
+}
+
+species1_net <- cor(t(species1_expr[,-1]), method = cor_method)
+dimnames(species1_net) <- list(species1_expr$Genes, species1_expr$Genes)
+
+species2_net <- cor(t(species2_expr[,-1]), method = cor_method)
+dimnames(species2_net) <- list(species2_expr$Genes, species2_expr$Genes)
+
+if (cor_sign == "abs") {
+  species1_net <- abs(species1_net)
+  species2_net <- abs(species2_net)
+}
+
+if (norm_method == "CLR") {
+  #species1_net <- matrix(c(1,0.1,0.2,0.1,1,1,0.2,1,1), nrow = 3, byrow = TRUE)
+  
+  z <- scale(species1_net)
+  z[z < 0] <- 0
+  species1_net <- sqrt(t(z)**2 + z**2)
+  
+  z <- scale(species2_net)
+  z[z < 0] <- 0
+  species2_net <- sqrt(t(z)**2 + z**2)
+  
+} else if (norm_method == "MR") {
+  R <- t(apply(species1_net, 1, rank))
+  species1_net <- sqrt(R * t(R))
+  
+  R <- t(apply(species2_net, 1, rank))
+  species2_net <- sqrt(R * t(R))
+}
+
+diag(species1_net) <- 0
+diag(species2_net) <- 0
+
+# Threshold for neighborhood in module network
+density_thr_neigh <- 0.01
+
+R <- sort(species1_net[upper.tri(species1_net, diag = FALSE)], decreasing = TRUE)
+species1_thr <- R[round(density_thr*length(R))]
+species1_thr_neigh <- R[round(density_thr_neigh*length(R))]
+
+R <- sort(species2_net[upper.tri(species2_net, diag = FALSE)], decreasing = TRUE)
+species2_thr <- R[round(density_thr*length(R))]
+species2_thr_neigh <- R[round(density_thr_neigh*length(R))]
+
+```
+
+### Module network 1
+
+```{r modulenet, warning=FALSE, error=FALSE, message=FALSE}
+
+# Only genes with clear changes in expression (2^3) can be centroids
+regulated <- species1_expr_long %>%
+  filter(Trees == "A1") %>%
+  group_by(Genes) %>%
+  mutate(Expression.max = max(Expression)) %>%
+  mutate(Expression.min = min(Expression)) %>%
+  filter(Expression.max - Expression.min > 3) %>%
+  distinct(Genes) %>% 
+  pull(Genes)
+
+# Centrality
+centrality <- data.frame(Genes = rownames(species1_net), 
+                         Degree = c(NA)) %>% 
+  filter(Genes %in% regulated)
+
+for (i in 1:nrow(centrality)) {
+  
+  neigh <- species1_net[centrality$Genes[i],]
+  neigh <- names(neigh[neigh >= species1_thr_neigh])
+
+  centrality$Degree[i] <- length(neigh)+1
+}
+
+load("../../AspWood/gene.cluster.RData")
+species1.d <- d
+centrality <- left_join(centrality, 
+                        gene.clusters %>% select(Genes, Colors), 
+                        by = "Genes")
+remove(d, gene.clusters)
+
+centrality <- centrality %>%
+  arrange(desc(Degree)) %>%
+  filter(Degree > 20)
+
+expressologs <- comparison_table %>%
+  ungroup() %>%
+  mutate(Max.p.val = as.numeric(Max.p.val)) %>%
+  filter(Max.p.val < 0.05) %>%
+  distinct(Species1) %>%
+  pull(Species1)
+
+# Modules
+genes.covered <- c()
+module.net <- data.frame()
+module.net.genes <- list()
+for (i in 1:nrow(centrality)) {
+
+  g <- centrality$Genes[i]
+  d <- centrality$Degree[i]
+  c <- centrality$Colors[i]
+
+  neigh <- species1_net[g,]
+  neigh <- names(neigh[neigh >= species1_thr_neigh])
+  
+  if (length(neigh) > 10 & length(intersect(neigh, genes.covered)) == 0) {
+    
+    #cat(i, "\n") 
+    
+    # Compute conservation based on genes with ortholog
+    neigh2 <- neigh[neigh %in% comparison_table$Species1]
+    conserved <- sum(neigh2 %in% expressologs)/length(neigh2)
+    
+    m <- paste0("Module", nrow(module.net)+1)
+    
+    row <- data.frame(Module = m, CentralGene = g, Degree = d, Cluster = c, Conserved = conserved)
+    module.net <- rbind(module.net, row)
+    
+    module.net.genes[[m]] <- c(g, neigh)
+    
+    genes.covered <- unique(c(genes.covered, neigh))
+  }
+}
+
+cat("No. modules: ", nrow(module.net), "\n")
+
+cat ("Genes covered by modules: ", length(genes.covered), " -> ",
+     length(genes.covered) / length(unique(comparison_table$Species1)), "\n")
+
+# Reassign other genes using second threshold
+genes.not.covered <- unique(comparison_table$Species1)[!(unique(comparison_table$Species1) %in% genes.covered)]
+centers <- module.net$CentralGene
+for (g in genes.not.covered) {
+  
+  neigh <- species1_net[g, centers]
+  neigh <- sort(neigh[neigh >= species1_thr], decreasing = TRUE)
+  
+  if (length(neigh) > 0) {
+    
+    c <- names(neigh[1])
+    m <- module.net %>% filter(CentralGene == c) %>% pull(Module)
+    
+    module.net$Degree[module.net$Module == m]
+    module.net.genes[[m]] <- c(module.net.genes[[m]], g)
+    genes.covered <- c(genes.covered, g)
+    
+  }
+}
+# Update module degrees
+for (i in 1:nrow(module.net)) {
+  
+  m <- module.net$Module[i]
+  module.net$Degree[i] <- length(module.net.genes[[m]])
+  
+}
+
+cat ("Genes covered by modules: ", length(genes.covered), " -> ",
+     length(genes.covered) / length(unique(comparison_table$Species1)), "\n")
+
+marker_genes_names <- c("SUS6", "CDC2", "EXPA1", "CesA8", "BFN1")
+marker_genes_ids <- c("Potra2n4c9149", "Potra2n16c30563", "Potra2n1c2087", "Potra2n4c8952", "Potra2n689s36475")
+for (module in names(module.net.genes)) {
+  idx <- marker_genes_ids %in% module.net.genes[[module]]
+  if (sum(idx) > 0) {
+    cat(marker_genes_names[idx], " in ", module, "\n")
+  }
+}
+species1_expr_long %>%
+  filter(Genes %in% marker_genes_ids) %>%
+  ggplot(aes(x = Samples, y = Expression, col = Genes)) +
+  geom_line(linewidth = 2) +
+  ylab("Expression (VST)") +
+  geom_vline(data = species1.d, mapping = aes(xintercept = xintercept), 
+             linetype="dashed", color = "gray68", linewidth=0.5) +
+  ggtitle("Marker genes")
+
+cesA_names <- c("PtCesA4", "PtCesA7-A", "PtCesA7-B", "PtCesA8-A", "PtCesA8-B")
+cesA_ids <- c("Potra2n2c4078", "Potra2n6c13749", "Potra2n18c32336", "Potra2n11c23199", "Potra2n4c8952")
+for (module in names(module.net.genes)) {
+  idx <- cesA_ids %in% module.net.genes[[module]]
+  if (sum(idx) > 0) {
+    cat(cesA_names[idx], " in ", module, "\n")
+  }
+}
+species1_expr_long %>%
+  filter(Genes %in% cesA_ids) %>%
+  ggplot(aes(x = Samples, y = Expression, col = Genes)) +
+  geom_line(linewidth = 2) +
+  ylab("Expression (VST)") +
+  geom_vline(data = species1.d, mapping = aes(xintercept = xintercept), 
+             linetype="dashed", color = "gray68", linewidth=0.5) +
+  ggtitle("Secondary cell wall CesA")
+
+
+####### Plot
+
+plots <- list()
+for (i in 1:nrow(module.net)) {
+  
+  g <- module.net[i, "CentralGene"]
+  m <- module.net[i, "Module"]
+  c <- module.net[i, "Cluster"]
+  neigh <- module.net.genes[[m]]
+    
+  centroid <- species1_expr_long %>%
+    filter(Genes %in% neigh) %>%
+    group_by(Samples) %>% 
+    summarise(Expression.scaled = mean(Expression.scaled))
+    
+  plots[[m]] <- species1_expr_long %>%
+    filter(Genes %in% neigh) %>%
+    ggplot(aes(x = Samples, y = Expression.scaled, col = Genes)) +
+    geom_line() + ylim(range(centroid$Expression.scaled)) +
+    scale_color_manual(values = rep("azure3", length(unique(neigh)))) +
+    theme(legend.position="none") +
+    geom_line(data = centroid, mapping = aes(x = Samples, y = Expression.scaled), col = c, linewidth = 2) +
+    geom_vline(data = species1.d, mapping = aes(xintercept = xintercept), linetype="dashed", col = "black", size=0.5) +
+    theme(axis.title.x =element_blank(), axis.title.y =element_blank())
+
+}
+
+plot_grid(plotlist = plots)
+
+####### Save
+
+background <- rownames(species1_net)
+save(module.net, module.net.genes, background, plots, file = paste0(comparison_RData, "-modules1.RData"))
+
+```
+
+### Module network 2
+
+```{r modulenet2, warning=FALSE, error=FALSE, message=FALSE}
+
+# Only genes with clear changes in expression (2^3) can be centroids
+regulated <- species2_expr_long %>%
+  filter(Trees == "N1") %>%
+  group_by(Genes) %>%
+  mutate(Expression.max = max(Expression)) %>%
+  mutate(Expression.min = min(Expression)) %>%
+  filter(Expression.max - Expression.min > 3) %>%
+  distinct(Genes) %>% 
+  pull(Genes)
+
+# Centrality
+centrality <- data.frame(Genes = rownames(species2_net), 
+                         Degree = c(NA)) %>% 
+  filter(Genes %in% regulated)
+
+for (i in 1:nrow(centrality)) {
+  
+  neigh <- species2_net[centrality$Genes[i],]
+  neigh <- names(neigh[neigh >= species2_thr_neigh])
+
+  centrality$Degree[i] <- length(neigh)+1
+}
+
+load("../../NorWood/gene.cluster.RData")
+species2.d <- d
+centrality <- left_join(centrality, 
+                        gene.clusters %>% select(Genes, Colors), 
+                        by = "Genes")
+remove(d, gene.clusters)
+
+centrality <- centrality %>%
+  arrange(desc(Degree)) %>%
+  filter(Degree > 20)
+
+expressologs <- comparison_table %>%
+  ungroup() %>%
+  mutate(Max.p.val = as.numeric(Max.p.val)) %>%
+  filter(Max.p.val < 0.05) %>%
+  distinct(Species2) %>%
+  pull(Species2)
+
+# Modules
+genes.covered <- c()
+module.net <- data.frame()
+module.net.genes <- list()
+for (i in 1:nrow(centrality)) {
+
+  g <- centrality$Genes[i]
+  d <- centrality$Degree[i]
+  c <- centrality$Colors[i]
+
+  neigh <- species2_net[g,]
+  neigh <- names(neigh[neigh >= species2_thr_neigh])
+  
+  if (length(neigh) > 10 & length(intersect(neigh, genes.covered)) == 0) {
+    
+    #cat(i, "\n") 
+    
+    # Compute conservation based on genes with ortholog
+    neigh2 <- neigh[neigh %in% comparison_table$Species2]
+    conserved <- sum(neigh2 %in% expressologs)/length(neigh2)
+    
+    m <- paste0("Module", nrow(module.net)+1)
+    
+    row <- data.frame(Module = m, CentralGene = g, Degree = d, Cluster = c, Conserved = conserved)
+    module.net <- rbind(module.net, row)
+    
+    module.net.genes[[m]] <- c(g, neigh)
+    
+    genes.covered <- unique(c(genes.covered, neigh))
+  }
+}
+
+cat("No. modules: ", nrow(module.net), "\n")
+
+cat ("Genes covered by modules: ", length(genes.covered), " -> ",
+     length(genes.covered) / length(unique(comparison_table$Species2)), "\n")
+
+# Reassign other genes using second threshold
+genes.not.covered <- unique(comparison_table$Species2)[!(unique(comparison_table$Species2) %in% genes.covered)]
+centers <- module.net$CentralGene
+for (g in genes.not.covered) {
+  
+  neigh <- species2_net[g, centers]
+  neigh <- sort(neigh[neigh >= species2_thr], decreasing = TRUE)
+  
+  if (length(neigh) > 0) {
+    
+    c <- names(neigh[1])
+    m <- module.net %>% filter(CentralGene == c) %>% pull(Module)
+    
+    module.net$Degree[module.net$Module == m]
+    module.net.genes[[m]] <- c(module.net.genes[[m]], g)
+    genes.covered <- c(genes.covered, g)
+    
+  }
+}
+# Update module degrees
+for (i in 1:nrow(module.net)) {
+  
+  m <- module.net$Module[i]
+  module.net$Degree[i] <- length(module.net.genes[[m]])
+  
+}
+
+cat ("Genes covered by modules: ", length(genes.covered), " -> ",
+     length(genes.covered) / length(unique(comparison_table$Species2)), "\n")
+
+marker_genes_names <- c("SUS6", "CDC2", "EXPA1", "CesA8", "BFN1")
+marker_genes_ids <- c("PA_chr10_G000055", "PA_chr04_G001371", "PA_chr03_G007209", "PA_chr11_G000197", "PA_chr02_G005278")
+for (module in names(module.net.genes)) {
+  idx <- marker_genes_ids %in% module.net.genes[[module]]
+  if (sum(idx) > 0) {
+    cat(marker_genes_names[idx], " in ", module, "\n")
+  }
+}
+species2_expr_long %>%
+  filter(Genes %in% marker_genes_ids) %>%
+  ggplot(aes(x = Samples, y = Expression, col = Genes)) +
+  geom_line(linewidth = 2) +
+  ylab("Expression (VST)") +
+  geom_vline(data = species2.d, mapping = aes(xintercept = xintercept), 
+             linetype="dashed", color = "gray68", linewidth=0.5) +
+  ggtitle("Marker genes")
+
+cesA_ids <- comparison_table %>% 
+  filter(OrthoGroup == "OG0000141") %>% 
+  filter(Max.p.val < 0.05) %>% 
+  distinct(Species2) %>% 
+  pull(Species2)
+cesA_names <- paste0("CesA-", 1:length(cesA_ids))
+
+cesA_names <- c("CesA-1", "CesA-2", "CesA-3")
+cesA_ids <- c("PA_chr03_G001205", "PA_chr10_G000911", "PA_chr11_G000197")
+
+for (module in names(module.net.genes)) {
+  idx <- cesA_ids %in% module.net.genes[[module]]
+  if (sum(idx) > 0) {
+    cat(cesA_names[idx], " in ", module, "\n")
+  }
+}
+species2_expr_long %>%
+  filter(Genes %in% cesA_ids) %>%
+  ggplot(aes(x = Samples, y = Expression, col = Genes)) +
+  geom_line(linewidth = 2) +
+  ylab("Expression (VST)") +
+  geom_vline(data = species2.d, mapping = aes(xintercept = xintercept), 
+             linetype="dashed", color = "gray68", linewidth=0.5) +
+  ggtitle("Secondary cell wall CesA")
+
+
+####### Plot
+
+plots <- list()
+for (i in 1:nrow(module.net)) {
+  
+  g <- module.net[i, "CentralGene"]
+  m <- module.net[i, "Module"]
+  c <- module.net[i, "Cluster"]
+  neigh <- module.net.genes[[m]]
+    
+  centroid <- species2_expr_long %>%
+    filter(Genes %in% neigh) %>%
+    group_by(Samples) %>% 
+    summarise(Expression.scaled = mean(Expression.scaled))
+    
+  plots[[m]] <- species2_expr_long %>%
+    filter(Genes %in% neigh) %>%
+    ggplot(aes(x = Samples, y = Expression.scaled, col = Genes)) +
+    geom_line() + ylim(range(centroid$Expression.scaled)) +
+    scale_color_manual(values = rep("azure3", length(unique(neigh)))) +
+    theme(legend.position="none") +
+    geom_line(data = centroid, mapping = aes(x = Samples, y = Expression.scaled), col = c, linewidth = 2) +
+    geom_vline(data = species2.d, mapping = aes(xintercept = xintercept), linetype="dashed", col = "black", size=0.5) +
+    theme(axis.title.x =element_blank(), axis.title.y =element_blank())
+
+}
+
+plot_grid(plotlist = plots)
+
+####### Save
+
+background <- rownames(species2_net)
+save(module.net, module.net.genes, background, plots, file = paste0(comparison_RData, "-modules2.RData"))
+
+```
