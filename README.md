@@ -2,7 +2,7 @@
 
 Git repository for the Wood Regulomics article.
 
-To run the scripts, first download DATA.tar.gz (link to figshare??) containing the input data. 
+To run the scripts, first download DATA.tar.gz (link to figshare!!) containing the input data. 
 Scripts in this repo assumes there is a folder named *DATA* in the project root.
 All scripts (except .Rmd) should be run with project root as working directory such that data can be loaded with the relative path `DATA/`.
 
@@ -45,7 +45,9 @@ Then run either aspen/aspen_GRN.R or spruce/spruce_GRN.R to create the GRNs.
 
 **Workflow**
 
-1. Run ComPlEx.R for all 15 pairs of species.
+Note: both standard orthogroups (OGs) and Hierarchical Orthogroups (HOGs) with higher resolution were used. Comparison-files under `DATA/comparisonFiles` generated using HOGs are denoted "V5"  while files generated using OGs are denoted "V4". The workflow is the same regardless of type of resolution, however, note that the size of OGs increases memory requirements and runtime significantly. 
+
+1. Run COMPLEX_script.R for all 15 pairs of species. Produces comparison files.
 2. Run basicFiles.R, a script for compiling files for downstream analysis.
 3. Run the clique algorithms in order explained below. To avoid overlap in orthogroups (OGs) between the different sets conserved/differentiated genes (e.g. a gene should not be classified as both partially conserved, and as differentiated), the clique
    scripts must be run in the following order:
