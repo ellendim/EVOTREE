@@ -4,53 +4,73 @@
 library(tidyverse)
 library(igraph)
 
-setwd("Cliques")
+groupType <- "_OGs" # "" for HOGs, "_OG" for OGs
 
-# Load necessary files
-load("DATA/all_expressed_genes.RData")
-load("DATA/ones_and_zeros_all.RData")  
+load(paste0("DATA/all_expressed_genes",groupType,".RData"))
+load(paste0("DATA/ones_and_zeros_all",groupType,".RData"))  
 
-# Table for identifying which orthogroups have expressed genes for the various species.
-df_with_sums <- ones_and_zeros_all %>%
-  mutate(Angiosperms = rowSums(. [1:3])) %>%
-  mutate(Cross = rowSums(. [4:12]))%>%
-  mutate(Gymnosperms = rowSums(. [13:15])) %>%
-  mutate(Conserved = rowSums(. [1:15]))%>%
-  filter(Conserved >= 3) 
 
-# Filtering expressed genes for co-expressologs
 pval <- 0.1
-expressologs <- expr_genes %>%
-  filter(Max.p.Val < pval) %>%
-  group_by(OrthoGroup) %>% 
-  mutate(OG_size = n()) %>% 
-  ungroup() %>% 
-  arrange(desc(OG_size)) %>% 
-  filter(OG_size >= 3)
+if(groupType == ""){
+  
+  df_with_sums <- ones_and_zeros_all %>%
+    mutate(Angiosperms = rowSums(. [1:3])) %>%
+    mutate(Cross = rowSums(. [4:12]))%>%
+    mutate(Gymnosperms = rowSums(. [13:15])) %>%
+    mutate(Conserved = rowSums(. [1:15]))%>%
+    filter(Conserved >= 3)
+  
+  co_expressologs <- expr_genes %>%
+    filter(Max.p.Val < pval) %>%
+    group_by(OrthoGroup) %>% 
+    mutate(OG_size = n()) %>% 
+    ungroup() %>% 
+    arrange(desc(OG_size)) %>% 
+    filter(OG_size >= 3)
+  
+}else{
+  
+  df_with_sums <- ones_and_zeros_all_OG %>%
+    mutate(Angiosperms = rowSums(. [1:3])) %>%
+    mutate(Cross = rowSums(. [4:12]))%>%
+    mutate(Gymnosperms = rowSums(. [13:15])) %>%
+    mutate(Conserved = rowSums(. [1:15]))%>%
+    filter(Conserved >= 3) 
+  
+  discard_list <- c("OG0000000",  "OG0000018", "OG0000001", "OG0000007")
+  
+  co_expressologs <- expr_genes %>%
+    filter(Max.p.Val < pval) %>%
+    mutate(!(OrthoGroup %in% discard_list)) %>% 
+    group_by(OrthoGroup) %>% 
+    mutate(OG_size = n()) %>% 
+    ungroup() %>% 
+    arrange(desc(OG_size)) %>% 
+    filter(OG_size >= 3)
+  }
 
-# cat("\n","Largest orthogroup: ", max(expressologs$OG_size), " gene pairs.", "\n", "Average orthogroup: ", 
-#     round(mean(expressologs$OG_size), 0), " gene pairs.", "\n", "Smallest orthogroup: ", min(expressologs$OG_size), " gene pairs.")  
 
-OGs_to_use <- unique(expressologs$OrthoGroup)
+
+OGs_to_use <- unique(co_expressologs$OrthoGroup)
 
 # Clique algorithm 
-expressologs_from_max_cliques <- list() 
+co_expressologs_from_max_cliques <- list() 
 for (i in 1:length(OGs_to_use)) {
 
   print(paste0(i, "/", length(OGs_to_use)))
   
   # For each OG a network is created using genes as nodes and 
   g <- OGs_to_use[i]
-  expressologs_g <- expressologs %>% 
+  co_expressologs_g <- co_expressologs %>% 
     filter(OrthoGroup == g) 
   
-  expressologs_g <- expressologs_g %>% 
-    mutate(UGeneSpecies1 = paste0(expressologs_g$Species1, "-", expressologs_g$GeneSpecies1),
-           UGeneSpecies2 = paste0(expressologs_g$Species2, "-", expressologs_g$GeneSpecies2))
+  co_expressologs_g <- co_expressologs_g %>% 
+    mutate(UGeneSpecies1 = paste0(co_expressologs_g$Species1, "-", co_expressologs_g$GeneSpecies1),
+           UGeneSpecies2 = paste0(co_expressologs_g$Species2, "-", co_expressologs_g$GeneSpecies2))
   
-  nodes <- data.frame(name = unique(c(expressologs_g$UGeneSpecies1, expressologs_g$UGeneSpecies2)))
-  edges <- data.frame(from = expressologs_g$UGeneSpecies1, 
-                      to = expressologs_g$UGeneSpecies2)
+  nodes <- data.frame(name = unique(c(co_expressologs_g$UGeneSpecies1, co_expressologs_g$UGeneSpecies2)))
+  edges <- data.frame(from = co_expressologs_g$UGeneSpecies1, 
+                      to = co_expressologs_g$UGeneSpecies2)
   
   net <- graph_from_data_frame(edges, directed = FALSE, vertices = nodes)
   largest_clique <- max_cliques(net, min = 3) # list of all cliques from size 3 to 6
@@ -71,18 +91,18 @@ for (i in 1:length(OGs_to_use)) {
     clique_species <- str_split_fixed(clique_name, "-", n = 2)[,1]
     clique_genes <-  str_split_fixed(clique_name, "-", n = 2)[,2]
     
-    expressologs_in_clique <- expressologs_g %>%
+    co_expressologs_in_clique <- co_expressologs_g %>%
       filter(UGeneSpecies1 %in% clique_name & UGeneSpecies2 %in% clique_name) %>%
       select( OrthoGroup, Species1, GeneSpecies1, Species2, GeneSpecies2, Max.p.Val) %>%
       mutate(cliqueID = paste0(g,"_" ,c))
     
     
-    expressologs_from_max_cliques <- append(expressologs_from_max_cliques, list(expressologs_in_clique))
+    co_expressologs_from_max_cliques <- append(co_expressologs_from_max_cliques, list(co_expressologs_in_clique))
     
   }
 }
 
-clique_genes_unlisted <- plyr::ldply(expressologs_from_max_cliques)
+clique_genes_unlisted <- plyr::ldply(co_expressologs_from_max_cliques)
 
 complete_cliques_filterable <- clique_genes_unlisted %>%
   mutate(species_pair = paste0(Species1, Species2)) %>% 
@@ -90,13 +110,13 @@ complete_cliques_filterable <- clique_genes_unlisted %>%
   mutate(OriginalCliqueSize = n())%>%  
   ungroup()
 
-saveRDS(complete_cliques_filterable, file = "DATA/cliqueOutput/clique_genes_filterable_COMPLETE.RDS")
+saveRDS(complete_cliques_filterable, file = paste0("DATA/cliqueOutput/clique_genes_filterable_COMPLETE",groupType,".RDS"))
 
 
 
 # --------------- CONSERVED ACROSS ALL SPECIES -----------------------------
 # Identify 6M cliques
-caas <-readRDS("DATA/cliqueOutput/clique_genes_filterable_COMPLETE.RDS") %>% 
+caas <-readRDS(paste0("DATA/cliqueOutput/clique_genes_filterable_COMPLETE",groupType,".RDS")) %>% 
   filter(OriginalCliqueSize == 15) %>% 
   select(Species1, GeneSpecies1, Species2, GeneSpecies2, OrthoGroup, cliqueID, Max.p.Val)
 
@@ -136,10 +156,10 @@ caas_wider <- caas_wider %>%
 length(unique(caas_wider$OrthoGroup))
 length(unique(caas_wider$cliqueID))
 
-saveRDS(caas_wider, file = "DATA/cliqueOutput/conserved_genes_COMPLETE_wider.RDS")
+saveRDS(caas_wider, file = paste0("DATA/cliqueOutput/conserved_genes_COMPLETE_wider",groupType,".RDS"))
 
 conserved_complete_OG <- caas_wider %>% distinct(OrthoGroup) %>% pull(OrthoGroup)
-saveRDS(conserved_complete_OG, file = "DATA/conserved_complete_OG.RDS") # Save OGs in order to remove conserved genes from other sets.
+saveRDS(conserved_complete_OG, file = paste0("DATA/conserved_complete_groups",groupType,".RDS")) # Save HOGs/OGs in order to remove conserved genes from other sets.
 
 
 # ------------------DICOT-SPECIC GENES----------------------
@@ -149,7 +169,7 @@ angio_specific_OG <- df_with_sums %>%
   rownames_to_column(var = "OG") %>% 
   pull(OG)
 
-angio <-readRDS("DATA/cliqueOutput/clique_genes_filterable_COMPLETE.RDS") %>% 
+angio <-readRDS(paste0("DATA/cliqueOutput/clique_genes_filterable_COMPLETE",groupType,".RDS")) %>% 
   filter(OrthoGroup %in% angio_specific_OG) 
 
 spc1 <- angio %>% 
@@ -189,7 +209,7 @@ rm(angio)
 length(unique(angio_wider$OrthoGroup))
 length(unique(angio_wider$cliqueID))
 
-saveRDS(angio_wider, file = "DATA/cliqueOutput/dicto_specific_genes_wider.RDS")
+saveRDS(angio_wider, file = paste0("DATA/cliqueOutput/dicot_specific_genes_wider",groupType,".RDS"))
 
 # ------------------GYMNO-SPECIC GENES----------------------
 gymno_specific_OG <- df_with_sums %>% 
@@ -197,7 +217,7 @@ gymno_specific_OG <- df_with_sums %>%
   rownames_to_column(var = "OG") %>% 
   pull(OG)
 
-gymno <-readRDS("DATA/cliqueOutput/clique_genes_filterable_COMPLETE.RDS") %>% 
+gymno <-readRDS(paste0("DATA/cliqueOutput/clique_genes_filterable_COMPLETE",groupType,".RDS")) %>% 
   filter(OrthoGroup %in% gymno_specific_OG) 
 
 spc1 <- gymno %>% 
@@ -237,7 +257,7 @@ rm(gymno)
 length(unique(gymno_wider$OrthoGroup))
 length(unique(gymno_wider$cliqueID))
 
-saveRDS(gymno_wider, file = "DATA/cliqueOutput/conifer_specific_genes_wider.RDS")
+saveRDS(gymno_wider, file = paste0("DATA/cliqueOutput/conifer_specific_genes_wider",groupType,".RDS"))
 
 
 

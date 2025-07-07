@@ -4,8 +4,11 @@
 
 library(tidyverse)
 
-VER <- "V5"
+VER <- "V5" # V5 for HOGs, V4 for OGs
+groupType <- "" # "" for HOGs, else "_OG"
 ORTHOLOG_GROUP_FILE <- "DATA/OrthoGroups/Orthogroups_20240823_clean_N1.tsv.gz" 
+                        #"DATA/OrthoGroups/Orthogroups_20240823_clean_N1.tsv.gz" for HOGs
+                        #"DATA/OrthoGroups/Orthogroups_20240823_clean.tsv.gz" for OGs
 
 # List of all comparison files
 species_list <- c("Lodge", "Asp", "Nor","Scots","Birch","Cher")
@@ -59,7 +62,7 @@ for (x in file_list_1){
 expr_genes <- expr_genes %>% 
   arrange(OrthoGroup)
 
-save(expr_genes, file = "DATA/all_expressed_genes.RData")
+save(expr_genes, file = paste0("DATA/all_expressed_genes",groupType,".RData"))
 
 ## --- ones_and_zeros_all ---
 # Orthogroups with binary input for presence (1) or absence (0) of at least one expressed gene pair (per species pair).
@@ -121,7 +124,7 @@ ones_and_zeros_all <- ones_and_zeros_all %>%
   mutate_if(is.character, as.integer) %>% 
   select(col_order)
 
-save(ones_and_zeros_all, file = "DATA/ones_and_zeros_all.RData")
+save(ones_and_zeros_all, file = paste0("DATA/ones_and_zeros_all",groupType,".RData"))
 
 
 # --- Sample clusters ---

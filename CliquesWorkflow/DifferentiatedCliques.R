@@ -1,19 +1,15 @@
 library(tidyverse)
 library(igraph)
 
+setwd("Cliques")
+groupType <- "" # "" for HOGs, "_OG" for OGs
 
+load(paste0("DATA/all_expressed_genes",groupType,".RData"))
+load(paste0("DATA/ones_and_zeros_all",groupType,".RData"))  
 
-caas <- readRDS("DATA/cliqueOutput/conserved_genes_COMPLETE_wider.RDS")
+caas <- readRDS(paste0("DATA/cliqueOutput/conserved_genes_COMPLETE_wider",groupType,".RDS"))
 p_caas <- readRDS("DATA/cliqueOutput/conserved_genes_PARTIAL_wider.RDS")
-dicot <- readRDS("DATA/cliqueOutput/dicot_specific_genes_wider.RDS")
-conifer <- readRDS("DATA/cliqueOutput/conifer_specific_genes_wider.RDS")
 
-# --- Identifying DIFFERENTIATED cliques ---
-
-load("DATA/ones_and_zeros_all.RData")
-load("DATA/all_expressed_genes.RData")
-
-# Remove OGs containing conserved or lineage-specific genes
 df_with_sums <- ones_and_zeros_all %>%
   mutate(Angiosperms = rowSums(. [1:3])) %>%
   mutate(Cross = rowSums(. [4:12]))%>%
@@ -21,7 +17,13 @@ df_with_sums <- ones_and_zeros_all %>%
   mutate(Conserved = rowSums(. [1:15]))%>%
   filter(Conserved == 15 ) 
 
-none_of_these <- c(unique(caas$OrthoGroup), unique(p_caas$OrthoGroup))
+# --- Identifying DIFFERENTIATED cliques ---
+
+if(groupType == ""){
+  none_of_these <- c(unique(caas$OrthoGroup), unique(p_caas$OrthoGroup))
+}else{
+  none_of_these <- c(unique(caas$OrthoGroup))
+}
 
 leftoverOG <- df_with_sums %>% 
   filter(!(rownames(df_with_sums)%in%none_of_these)) %>% 
@@ -29,6 +31,7 @@ leftoverOG <- df_with_sums %>%
 
 expressologs <- expr_genes %>%
   filter(OrthoGroup %in% rownames(leftoverOG)) %>% 
+  filter(pval < 0.9) %>% 
   group_by(OrthoGroup) %>% 
   mutate(OG_size = n()) %>% 
   ungroup() %>% 
@@ -39,8 +42,8 @@ OGs_to_use <- unique(expressologs$OrthoGroup)
 
 expressologs_from_max_cliques <- list() 
 for (i in 1:length(OGs_to_use)) {
-  # i <- 40
-  print(paste0(i, "/", length(OGs_to_use)))
+
+    print(paste0(i, "/", length(OGs_to_use)))
   
   g <- OGs_to_use[i]
   
@@ -152,7 +155,7 @@ dbl_wider <- rbind(spc1, spc2) %>%
   ungroup()
 
 
-saveRDS(dbl_wider, file = "DATA/cliqueOutput/differentiated_genes_wider.RDS")
+saveRDS(dbl_wider, file = paste0("DATA/cliqueOutput/differentiated_genes_wider",groupType,".RDS"))
 
 
 
