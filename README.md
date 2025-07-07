@@ -2,7 +2,7 @@
 
 Git repository for the Wood Regulomics article.
 
-To run the scripts, first download DATA.tar.gz (link to figshare!!) containing the input data. 
+To run the scripts, first download DATA.tar.gz (link to figshare coming soon...) containing the input data. 
 Scripts in this repo assumes there is a folder named *DATA* in the project root.
 All scripts (except .Rmd) should be run with project root as working directory such that data can be loaded with the relative path `DATA/`.
 
