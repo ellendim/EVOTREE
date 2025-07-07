@@ -45,18 +45,18 @@ Then run either aspen/aspen_GRN.R or spruce/spruce_GRN.R to create the GRNs.
 
 **Workflow**
 
-Note: both standard orthogroups (OGs) and Hierarchical Orthogroups (HOGs) with higher resolution were used. Comparison-files under `DATA/comparisonFiles` generated using HOGs are denoted "V5"  while files generated using OGs are denoted "V4". The workflow is the same regardless of type of resolution, however, note that the size of OGs increases memory requirements and runtime significantly. 
+*Note: both standard orthogroups (OGs) and Hierarchical Orthogroups (HOGs) with higher resolution were used. Comparison-files under `DATA/comparisonFiles` generated using HOGs are denoted "V5"  while files generated using OGs are denoted "V4". The workflow is the same regardless of type of resolution, however, note that the size of OGs increases memory requirements and runtime significantly. Some OGs are therefore removed prior to identifying cliques.* 
 
 1. Run COMPLEX_script.R for all 15 pairs of species. Produces comparison files.
 2. Run basicFiles.R, a script for compiling files for downstream analysis.
 3. Run the clique algorithms in order explained below. To avoid overlap in orthogroups (OGs) between the different sets conserved/differentiated genes (e.g. a gene should not be classified as both partially conserved, and as differentiated), the clique
    scripts must be run in the following order:
    
-   i. **CompleteCliques.R** - identifies genes conserved across all species (6M) and lineage-specific genes (3M). The latter gene sets (i.e. conifer- and dicot-specific) are identified from isolating the OGs with genes only present in the respective lineages.
+   i. **CompleteCliques.R** - identifies genes conserved across all species (6M),  partially present genes (5M), and lineage-specific genes (3M). The latter gene sets (i.e. conifer- and dicot-specific) are identified from isolating the OGs with genes only present in the respective lineages.
    
    ii. **PartialCliques.R** - identifies partially conserved genes in two batches: the code starts with removing OGs with complete 6M cliques in order to identity partial 6M cliques (partially significant), then identifies 5M complete cliques (partially present) from
-   CompleteCliquesAlgo.R
+   CompleteCliquesAlgo.R. Only for HOGs.
 
-   iii. **DifferentiatedCliques.R** - removes OGs with conserved, partially conserved, and lineage-specific genes. Identifies cliques with co-expressologs between species within the lineages and between no more than four of the inter-lineage pairs.
+   iii. **DifferentiatedCliques.R** - removes OGs with conserved and partially conserved. Identifies cliques with co-expressologs between species within the lineages and between no more than four of the inter-lineage pairs.
 
 
