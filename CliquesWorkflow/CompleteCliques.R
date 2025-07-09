@@ -4,7 +4,7 @@
 library(tidyverse)
 library(igraph)
 
-groupType <- "_OGs" # "" for HOGs, "_OG" for OGs
+groupType <- "" # "" for HOGs, "_OG" for OGs
 
 load(paste0("DATA/all_expressed_genes",groupType,".RData"))
 load(paste0("DATA/ones_and_zeros_all",groupType,".RData"))  
@@ -30,7 +30,7 @@ if(groupType == ""){
   
 }else{
   
-  df_with_sums <- ones_and_zeros_all_OG %>%
+  df_with_sums <- ones_and_zeros_all%>%
     mutate(Angiosperms = rowSums(. [1:3])) %>%
     mutate(Cross = rowSums(. [4:12]))%>%
     mutate(Gymnosperms = rowSums(. [13:15])) %>%
@@ -47,19 +47,19 @@ if(groupType == ""){
     ungroup() %>% 
     arrange(desc(OG_size)) %>% 
     filter(OG_size >= 3)
-  }
+}
 
+OGs_to_use <- unique(co_expressologs$OrthoGroup) 
 
-
-OGs_to_use <- unique(co_expressologs$OrthoGroup)
 
 # Clique algorithm 
-co_expressologs_from_max_cliques <- list() 
+co_expressologs_from_max_cliques <- list()
 for (i in 1:length(OGs_to_use)) {
 
   print(paste0(i, "/", length(OGs_to_use)))
   
   # For each OG a network is created using genes as nodes and 
+  
   g <- OGs_to_use[i]
   co_expressologs_g <- co_expressologs %>% 
     filter(OrthoGroup == g) 

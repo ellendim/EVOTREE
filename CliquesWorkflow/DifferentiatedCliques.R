@@ -1,7 +1,6 @@
 library(tidyverse)
 library(igraph)
 
-setwd("Cliques")
 groupType <- "" # "" for HOGs, "_OG" for OGs
 
 load(paste0("DATA/all_expressed_genes",groupType,".RData"))
@@ -21,8 +20,15 @@ df_with_sums <- ones_and_zeros_all %>%
 
 if(groupType == ""){
   none_of_these <- c(unique(caas$OrthoGroup), unique(p_caas$OrthoGroup))
+  
+  PairClades <- c("Cross", "Gymno", "Gymno", "Cross", "Cross", "Cross", "Angio", "Gymno", "Cross","Cross", "Cross", "Cross", 
+                     "Cross", "Angio", "Angio")
+  
 }else{
-  none_of_these <- c(unique(caas$OrthoGroup))
+  discard_list <- c("OG0000000",  "OG0000018", "OG0000001", "OG0000007")
+  none_of_these <- c(unique(caas$OrthoGroup), discard_list)
+  PairClades <- c("Gymno", "Gymno", "Gymno", "Cross", "Cross", "Cross", "Cross", "Cross", "Cross","Angio", "Cross", "Cross", 
+                  "Cross", "Angio", "Angio")
 }
 
 leftoverOG <- df_with_sums %>% 
@@ -31,7 +37,7 @@ leftoverOG <- df_with_sums %>%
 
 expressologs <- expr_genes %>%
   filter(OrthoGroup %in% rownames(leftoverOG)) %>% 
-  filter(pval < 0.9) %>% 
+  filter(Max.p.Val < 0.9) %>% 
   group_by(OrthoGroup) %>% 
   mutate(OG_size = n()) %>% 
   ungroup() %>% 
@@ -97,9 +103,10 @@ length(unique(complete_cliques_filterable$cliqueID))
 unique(complete_cliques_filterable$OriginalCliqueSize)
 
 # Setting requirements for cliques
+
 speciesPairClade <- tibble(pair = unique(complete_cliques_filterable$species_pair), 
-                           pairClade = c("Cross", "Gymno", "Gymno", "Cross", "Cross", "Cross", "Cross", "Angio", "Angio","Gymno", "Cross", "Cross", 
-                                         "Cross", "Cross", "Angio"))
+                           pairClade = PairClades)
+
 
 dbl_with_clades <- left_join(complete_cliques_filterable, speciesPairClade, by = join_by(species_pair == pair))
 dbl_with_clades <- dbl_with_clades %>% pivot_wider(values_from = species_pair, names_from = pairClade)
@@ -117,8 +124,7 @@ dbl_filterable <- dbl_filterable %>%
   select(-c(9:11))%>% 
   filter(Max.p.Val < 0.1) %>% 
   group_by(cliqueID) %>% 
-  filter(OriginalCliqueSize == 15) %>% 
-  filter(AngioSum == 3 & GymnoSum == 3)
+  filter(AngioSum == 3 & GymnoSum == 3 )
 
 length(unique(dbl_filterable$OrthoGroup))
 length(unique(dbl_filterable$cliqueID))
